@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Doc_GPT — Medical Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b5fff" />
+  <style>
+    :root{
+      --bg:#0b0e14;
+      --panel:#0f1420;
+      --card:#121a2a;
+      --card-2:#0f1626;
+      --text:#e9eefb;
+      --muted:#9ab0d0;
+      --accent:#0b5fff;
+      --accent-2:#4cc9f0;
+      --ok:#2ac870;
+      --warn:#f7b500;
+      --urgent:#ff4d4f;
+      --chip:#1b263b;
+      --border: #1f2a44;
+      --shadow: 0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.02);
+      --radius: 16px;
+      --radius-sm: 12px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      color: var(--text);
+      background: radial-gradient(1200px 800px at 20% -10%, #16213e 0%, transparent 60%),
+                  radial-gradient(1200px 800px at 120% 0%, #0f3460 0%, transparent 60%),
+                  var(--bg);
+    }
+
+    /* Layout */
+    .shell{
+      display:grid;
+      grid-template-columns: 360px 1fr;
+      gap: 20px;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    header{
+      padding: 18px 20px;
+      display:flex;align-items:center;gap:14px;
+      backdrop-filter: blur(8px);
+      position:sticky;top:0;z-index:5;
+      border-bottom:1px solid var(--border);
+      background: color-mix(in srgb, var(--bg) 85%, transparent);
+    }
+    .logo{
+      width:36px;height:36px;display:grid;place-items:center;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: var(--shadow);
+      font-weight:800;color:white;
+    }
+    h1{font-size:18px;margin:0}
+    .sub{font-size:13px;color:var(--muted)}
+
+    /* Panels / cards */
+    .panel{
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border:1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .card{
+      background: linear-gradient(180deg, color-mix(in srgb, var(--card) 90%, transparent), color-mix(in srgb, var(--card-2) 85%, transparent));
+      border:1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .stack{display:flex;flex-direction:column;gap:14px;padding:16px}
+    .section-title{font-weight:700;font-size:14px;color:#cfe0ff;letter-spacing:.3px}
+
+    /* Inputs */
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    select, input[type="number"], input[type="text"], textarea{
+      width:100%;
+      background:#0b1220;
+      border:1px solid var(--border);
+      color:var(--text);
+      padding:12px 14px;
+      border-radius: 12px;
+      outline:none;
+      transition:.15s border, .15s box-shadow;
+    }
+    textarea{min-height:120px;resize:vertical}
+    input:focus, select:focus, textarea:focus{
+      border-color: color-mix(in srgb, var(--accent) 70%, white 0%);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+    }
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+    /* Buttons */
+    .btn{
+      display:inline-flex;align-items:center;gap:10px;
+      padding:12px 16px;border-radius:12px;border:1px solid var(--border);
+      background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 22%, #0a1020), #0a1020);
+      color:white;font-weight:600;cursor:pointer;
+      transition: .15s transform, .15s filter, .15s background;
+    }
+    .btn:hover{filter:brightness(1.08)}
+    .btn:active{transform:translateY(1px)}
+    .btn.secondary{
+      background: #0b1220;
+      color: var(--text);
+    }
+    .btn.ghost{
+      background: transparent;
+      color: var(--muted);
+    }
+    .btn-row{display:flex;gap:10px;flex-wrap:wrap}
+
+    /* Status & chips */
+    .chip{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:6px 10px;border-radius:999px;font-size:12px;
+      background: var(--chip); color:#d7e3ff; border:1px solid var(--border);
+    }
+    .chip.ok{background: color-mix(in srgb, var(--ok) 12%, var(--chip)); color:#d8ffe9}
+    .chip.warn{background: color-mix(in srgb, var(--warn) 15%, var(--chip)); color:#fff3d1}
+    .chip.urgent{background: color-mix(in srgb, var(--urgent) 18%, var(--chip)); color:#ffe1e1}
+    .muted{color:var(--muted)}
+
+    /* Results surfaces */
+    .result-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
+    .list{display:flex;flex-direction:column;gap:8px}
+    .tile{
+      padding:12px;border:1px solid var(--border);border-radius:12px;background:#0c1322;
+    }
+    .progress{
+      height:8px;border-radius:999px;background:#0b1220;border:1px solid var(--border);overflow:hidden
+    }
+    .bar{height:100%; background: linear-gradient(90deg, var(--accent), var(--accent-2))}
+    .mono{font-family: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:12.5px}
+
+    /* Chat */
+    .chat{
+      display:flex;flex-direction:column;gap:12px;max-height:420px;overflow:auto;padding:12px;
+      border-radius:12px;border:1px solid var(--border); background:#0b1220;
+    }
+    .msg{padding:10px 12px;border-radius:12px;max-width:85%}
+    .me{align-self:flex-end;background:#0f1a34;border:1px solid var(--border)}
+    .bot{align-self:flex-start;background:#0f1528;border:1px solid var(--border)}
+    .sources{font-size:12px;color:var(--muted);margin-top:6px}
+    .src{display:inline-block;margin-right:8px}
+
+    /* Red-flag banner */
+    .rf{
+      display:none;margin-top:6px;
+      padding:10px 12px;border-radius:12px;border:1px solid color-mix(in srgb, var(--urgent) 40%, var(--border));
+      background: color-mix(in srgb, var(--urgent) 18%, #1a0e12);
+      color:#ffeaea
+    }
+    .rf.show{display:block}
+
+    /* Mobile */
+    @media (max-width: 980px){
+      .shell{grid-template-columns:1fr}
+      .result-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">D</div>
+    <div>
+      <h1>Doc_GPT</h1>
+      <div class="sub">Clinic‑style triage + trustworthy answers with citations (NHS/CDC)</div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <!-- LEFT: Intake form -->
+    <section class="panel stack" id="form-panel">
+      <div class="section-title">Patient Intake</div>
+
+      <div class="card stack">
+        <div class="row">
+          <div>
+            <label for="sex">Sex</label>
+            <select id="sex">
+              <option value="">Prefer not to say</option>
+              <option>female</option>
+              <option>male</option>
+              <option>other</option>
+            </select>
+          </div>
+          <div>
+            <label for="age">Age</label>
+            <input id="age" type="number" min="0" max="120" placeholder="e.g., 28" />
+          </div>
+        </div>
+
+        <div>
+          <label for="symptoms">Symptoms (free text)</label>
+          <textarea id="symptoms" placeholder="Describe symptoms. Example: 'sore throat, fever 38.5C, no cough'"></textarea>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="tempC">Temperature (°C)</label>
+            <input id="tempC" type="number" step="0.1" placeholder="e.g., 38.4" />
+          </div>
+          <div>
+            <label for="tempF">Temperature (°F)</label>
+            <input id="tempF" type="number" step="0.1" placeholder="e.g., 101.1" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="spo2">SpO₂ (%)</label>
+            <input id="spo2" type="number" step="1" min="50" max="100" placeholder="e.g., 98" />
+          </div>
+          <div>
+            <label for="hr">Heart rate (bpm)</label>
+            <input id="hr" type="number" step="1" min="20" max="220" placeholder="e.g., 90" />
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="btnTriage" class="btn">Run Triage</button>
+          <button id="btnReset" class="btn ghost" type="button">Reset</button>
+        </div>
+
+        <div id="rfBanner" class="rf"></div>
+      </div>
+
+      <div class="card stack">
+        <div class="section-title">Ask Doc_GPT</div>
+        <div class="chat" id="chat"></div>
+        <div class="row">
+          <input id="q" type="text" placeholder="Ask a follow‑up, e.g. 'What home care is safe for my sore throat?'" />
+          <button id="btnAsk" class="btn secondary">Ask</button>
+        </div>
+        <div class="muted mono">API: POST <span class="mono">/ask</span> (RAG) &nbsp;|&nbsp; Triage: POST <span class="mono">http://127.0.0.1:8001/triage</span></div>
+      </div>
+    </section>
+
+    <!-- RIGHT: Results -->
+    <section class="panel stack">
+      <div class="section-title">Triage Result</div>
+
+      <div class="card stack">
+        <div class="list">
+          <div><span class="muted">Top condition:</span> <strong id="topCond">—</strong></div>
+          <div class="row">
+            <div>
+              <div class="muted">FeverPAIN (0–5):</div>
+              <div class="chip" id="fpScore">—</div>
+            </div>
+            <div>
+              <div class="muted">Centor (–1 to 5):</div>
+              <div class="chip" id="centorScore">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="muted" style="margin-bottom:6px">Condition probabilities</div>
+          <div id="condList" class="list"></div>
+        </div>
+      </div>
+
+      <div class="card stack">
+        <div class="section-title">First Aid</div>
+        <ul id="firstAid" class="list" style="padding-left:18px;margin:0"></ul>
+      </div>
+
+      <div class="card stack">
+        <div class="section-title">OTC Options</div>
+        <ul id="otc" class="list" style="padding-left:18px;margin:0"></ul>
+      </div>
+
+      <div class="card stack">
+        <div class="section-title">Follow‑up Questions</div>
+        <ul id="followUps" class="list" style="padding-left:18px;margin:0"></ul>
+      </div>
+
+      <div class="muted mono" id="disclaimer"></div>
+    </section>
+  </main>
+
+  <script>
+    const TriageURL = "http://127.0.0.1:8001/triage"; // separate triage API
+    const AskURL    = "/ask"; // served by your existing FastAPI (port 8000)
+
+    const ui = {
+      sex:      document.getElementById("sex"),
+      age:      document.getElementById("age"),
+      symptoms: document.getElementById("symptoms"),
+      tempC:    document.getElementById("tempC"),
+      tempF:    document.getElementById("tempF"),
+      spo2:     document.getElementById("spo2"),
+      hr:       document.getElementById("hr"),
+      rfBanner: document.getElementById("rfBanner"),
+
+      btnTriage: document.getElementById("btnTriage"),
+      btnReset:  document.getElementById("btnReset"),
+
+      topCond: document.getElementById("topCond"),
+      fp:      document.getElementById("fpScore"),
+      centor:  document.getElementById("centorScore"),
+      condList: document.getElementById("condList"),
+      firstAid: document.getElementById("firstAid"),
+      otc:      document.getElementById("otc"),
+      follow:   document.getElementById("followUps"),
+      disclaimer: document.getElementById("disclaimer"),
+
+      chat:  document.getElementById("chat"),
+      q:     document.getElementById("q"),
+      btnAsk: document.getElementById("btnAsk"),
+    };
+
+    function chip(el, value, kind=""){
+      el.className = "chip" + (kind? " " + kind : "");
+      el.textContent = value;
+    }
+
+    function pct(n){ return Math.round(n*100); }
+
+    function progressRow(name, p){
+      const wrap = document.createElement("div");
+      wrap.className = "tile";
+      const top = document.createElement("div");
+      top.style.display = "flex"; top.style.justifyContent="space-between";
+      const n1 = document.createElement("div"); n1.textContent = name;
+      const n2 = document.createElement("div"); n2.textContent = pct(p) + "%"; n2.className="muted";
+      top.append(n1,n2);
+      const bar = document.createElement("div"); bar.className = "progress";
+      const inner = document.createElement("div"); inner.className="bar"; inner.style.width = (pct(p))+"%";
+      bar.appendChild(inner);
+      wrap.append(top, bar);
+      return wrap;
+    }
+
+    function li(text){
+      const li = document.createElement("li");
+      li.textContent = text;
+      return li;
+    }
+
+    function addMsg(role, text, sources){
+      const div = document.createElement("div");
+      div.className = "msg " + (role === "user" ? "me" : "bot");
+      div.textContent = text;
+      if (sources && sources.length){
+        const s = document.createElement("div");
+        s.className = "sources";
+        sources.forEach((c, i) => {
+          const a = document.createElement("a");
+          a.href = c.url; a.target = "_blank"; a.rel="noopener";
+          a.textContent = `[${i+1}] ${c.title||c.url}`;
+          a.className = "src";
+          s.appendChild(a);
+        });
+        div.appendChild(s);
+      }
+      ui.chat.appendChild(div);
+      ui.chat.scrollTop = ui.chat.scrollHeight;
+    }
+
+    function readFloat(id){
+      const v = id.value.trim();
+      if(!v) return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    }
+
+    function clearResults(){
+      ui.topCond.textContent = "—";
+      ui.condList.innerHTML = "";
+      ui.firstAid.innerHTML = "";
+      ui.otc.innerHTML = "";
+      ui.follow.innerHTML = "";
+      ui.disclaimer.textContent = "";
+      ui.rfBanner.classList.remove("show");
+      ui.rfBanner.textContent = "";
+      chip(ui.fp, "—");
+      chip(ui.centor, "—");
+    }
+
+    ui.btnReset.addEventListener("click", () => {
+      ui.sex.value = ""; ui.age.value = ""; ui.symptoms.value = "";
+      ui.tempC.value = ""; ui.tempF.value = ""; ui.spo2.value = ""; ui.hr.value = "";
+      clearResults();
+      ui.q.value = "";
+      ui.chat.innerHTML = "";
+    });
+
+    ui.btnTriage.addEventListener("click", async () => {
+      const payload = {
+        age: ui.age.value ? Number(ui.age.value) : undefined,
+        sex: ui.sex.value || undefined,
+        symptoms: ui.symptoms.value || "",
+        readings: {
+          temp_c: readFloat(ui.tempC),
+          temp_f: readFloat(ui.tempF),
+          spo2:   readFloat(ui.spo2),
+          hr:     readFloat(ui.hr),
+        }
+      };
+      // strip undefined
+      if (!payload.readings.temp_c) delete payload.readings.temp_c;
+      if (!payload.readings.temp_f) delete payload.readings.temp_f;
+      if (!payload.readings.spo2)   delete payload.readings.spo2;
+      if (!payload.readings.hr)     delete payload.readings.hr;
+      if (!Object.keys(payload.readings).length) delete payload.readings;
+
+      clearResults();
+      ui.btnTriage.disabled = true; ui.btnTriage.textContent = "Running…";
+
+      try{
+        const r = await fetch(TriageURL, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(payload)
+        });
+        if(!r.ok){
+          const t = await r.text();
+          throw new Error(`HTTP ${r.status}: ${t}`);
+        }
+        const data = await r.json();
+
+        // red flags
+        if (data.red_flags && data.red_flags.severity){
+          const sev = data.red_flags.severity;
+          if (sev === "urgent"){
+            ui.rfBanner.textContent = data.red_flags.banner || "⚠️ Emergency warning signs detected. Seek urgent care.";
+            ui.rfBanner.classList.add("show");
+          } else if (sev === "watch"){
+            ui.rfBanner.textContent = "⚠️ Elevated risk due to age or symptoms. Monitor closely and consider clinician advice.";
+            ui.rfBanner.classList.add("show");
+          }
+        }
+
+        // top condition + scores
+        ui.topCond.textContent = data.top_condition || "—";
+        chip(ui.fp, String(data.throat_scores?.feverpain ?? "—"));
+        chip(ui.centor, String(data.throat_scores?.centor ?? "—"));
+
+        const entries = Object.entries(data.condition_scores || {});
+        entries.sort((a,b)=> b[1]-a[1]);
+        for(const [name, p] of entries){
+          ui.condList.appendChild(progressRow(name, Number(p)));
+        }
+
+        // first aid / otc / follow-ups
+        (data.first_aid || []).forEach(s => ui.firstAid.appendChild(li(s)));
+        (data.otc || []).forEach(s => ui.otc.appendChild(li(s)));
+        (data.follow_up_questions || []).forEach(s => ui.follow.appendChild(li(s)));
+        ui.disclaimer.textContent = data.disclaimer || "";
+
+        // seed the chat with a suggested question if empty
+        if (!ui.q.value.trim()){
+          ui.q.value = `Given ${data.top_condition}, what should I monitor at home and when should I see a doctor?`;
+        }
+
+      }catch(err){
+        alert("Triage failed: " + err.message);
+      }finally{
+        ui.btnTriage.disabled = false; ui.btnTriage.textContent = "Run Triage";
+      }
+    });
+
+    ui.btnAsk.addEventListener("click", async () => {
+      const text = ui.q.value.trim();
+      if(!text){ ui.q.focus(); return; }
+      addMsg("user", text);
+
+      // include context (age/sex/symptoms) to help RAG compose answer
+      const prefix = [];
+      if (ui.sex.value) prefix.push(`sex: ${ui.sex.value}`);
+      if (ui.age.value) prefix.push(`age: ${ui.age.value}`);
+      if (ui.symptoms.value) prefix.push(`symptoms: ${ui.symptoms.value}`);
+      const query = prefix.length ? `${prefix.join("; ")}. ${text}` : text;
+
+      ui.btnAsk.disabled = true; ui.btnAsk.textContent = "Asking…";
+      try{
+        const r = await fetch(AskURL, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({ query, k: 6 })
+        });
+        if(!r.ok){
+          const t = await r.text();
+          throw new Error(`HTTP ${r.status}: ${t}`);
+        }
+        const data = await r.json();
+        const srcs = Array.isArray(data.citations) ? data.citations.map(c => ({
+          title: c.title || c.url,
+          url: c.url
+        })) : [];
+        addMsg("assistant", (data.answer || "").replace(/\n{3,}/g,"\n\n"), srcs);
+
+        // If backend returns red-flag note, surface it prominently
+        if (data.red_flag && data.red_flag.banner){
+          ui.rfBanner.textContent = data.red_flag.banner;
+          ui.rfBanner.classList.add("show");
+        }
+      }catch(err){
+        addMsg("assistant", "Sorry, I couldn't fetch an answer right now. " + err.message);
+      }finally{
+        ui.btnAsk.disabled = false; ui.btnAsk.textContent = "Ask";
+        ui.q.value = "";
+      }
+    });
+  </script>
+</body>
+</html>

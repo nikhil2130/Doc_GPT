@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Doc_GPT · Triage Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #11161d;
+      --muted: #8aa0b6;
+      --fg: #e6edf3;
+      --accent: #3ea6ff;
+      --ok: #24c17a;
+      --warn: #ffb224;
+      --danger: #ff5c5c;
+      --chip: #1a2330;
+      --ring: 0 0 0 2px rgba(62,166,255,.35);
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius: 14px;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f6f8fb; --panel: #ffffff; --muted:#5a6b7b; --fg:#0c1218;
+        --accent:#0b69ff; --chip:#eef3fb; --shadow:0 12px 30px rgba(14,30,59,.12);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 14.5px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+    }
+    .wrap { max-width: 1080px; margin: 32px auto; padding: 0 18px; }
+    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+    .brand { display:flex; gap:10px; align-items:center; }
+    .logo { width:36px; height:36px; border-radius:10px; background: linear-gradient(135deg,var(--accent),#7bdfff); box-shadow: var(--shadow); }
+    h1 { font-size:18px; margin:0; letter-spacing:.2px; }
+    .sub { color: var(--muted); font-size:13px; }
+
+    .grid { display:grid; grid-template-columns: 420px 1fr; gap:18px; }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--panel); border-radius: var(--radius); padding:16px 16px 14px;
+      box-shadow: var(--shadow); border: 1px solid rgba(90,110,133,.14);
+    }
+    .card h2 { margin: 2px 0 14px; font-size:15px; letter-spacing:.2px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .row3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
+    label { display:block; font-size:12px; color: var(--muted); margin:8px 0 6px; }
+    input, select, textarea, button {
+      width:100%; border-radius:12px; border:1px solid rgba(90,110,133,.22);
+      background: transparent; color: var(--fg); padding:12px 12px; outline: none;
+      transition: box-shadow .15s ease, border-color .15s ease, transform .04s ease;
+    }
+    input:focus, select:focus, textarea:focus { box-shadow: var(--ring); border-color: var(--accent); }
+    textarea { min-height: 108px; resize: vertical; }
+
+    .actions { display:flex; gap:10px; margin-top:12px; }
+    .btn {
+      background: var(--accent); color:#001019; font-weight:600; border:none; cursor:pointer;
+    }
+    .btn:active { transform: translateY(1px); }
+    .ghost { background: transparent; color: var(--accent); border:1px solid rgba(62,166,255,.5); }
+
+    .banner {
+      display:flex; gap:10px; align-items:flex-start; padding:12px; border-radius:12px;
+      background: rgba(255,92,92,.12); border:1px solid rgba(255,92,92,.35); color:#ffdede;
+      margin:8px 0 14px;
+    }
+    .banner.ok { background: rgba(36,193,122,.12); border-color: rgba(36,193,122,.35); color:#ddffec; }
+    .i { width:18px; height:18px; border-radius:6px; background: currentColor; opacity:.85; margin-top:2px; }
+
+    .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .chip { background: var(--chip); color: var(--fg); border:1px solid rgba(90,110,133,.16); padding:6px 10px; border-radius: 999px; font-size:12px; }
+
+    .section { margin-top:14px; }
+    .section h3 { font-size:13px; color: var(--muted); margin: 0 0 8px; }
+    ul.clean { list-style:none; padding:0; margin:0; }
+    ul.clean li { padding:8px 0; border-bottom:1px dashed rgba(90,110,133,.2); }
+    ul.clean li:last-child { border-bottom: none; }
+
+    .muted { color: var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size:12.5px; }
+    footer { margin: 22px 0; color: var(--muted); font-size:12px; }
+    .small { font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <h1>Doc_GPT · Triage Assistant</h1>
+          <div class="sub">Evidence-based first-aid guidance with red-flag safety checks.</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- Left: Intake form -->
+      <section class="card" aria-labelledby="intake">
+        <h2 id="intake">Patient intake</h2>
+
+        <div class="row">
+          <div>
+            <label for="gender">Gender</label>
+            <select id="gender" autocomplete="sex">
+              <option value="" selected>— Select —</option>
+              <option>female</option><option>male</option><option>other</option>
+            </select>
+          </div>
+          <div>
+            <label for="age">Age (years)</label>
+            <input id="age" type="number" min="0" max="120" inputmode="numeric" placeholder="e.g., 24" />
+          </div>
+        </div>
+
+        <label for="symptoms">Symptoms (comma-separated)</label>
+        <textarea id="symptoms" placeholder="e.g., sore throat, pain swallowing, fever 101F, no cough"></textarea>
+
+        <div class="row3">
+          <div>
+            <label for="temp">Thermometer</label>
+            <input id="temp" placeholder="e.g., 101.0 F or 38.3 C" />
+          </div>
+          <div>
+            <label for="hr">Heart rate</label>
+            <input id="hr" placeholder="e.g., 86 bpm" />
+          </div>
+          <div>
+            <label for="meds">Meds already taken?</label>
+            <input id="meds" placeholder="e.g., Paracetamol 500 mg" />
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="analyze" class="btn">Analyze</button>
+          <button id="clear" class="ghost">Clear</button>
+        </div>
+
+        <div class="small muted" style="margin-top:8px;">
+          By continuing you agree this is general information and not a substitute for professional care.
+        </div>
+      </section>
+
+      <!-- Right: Results -->
+      <section class="card" aria-labelledby="result">
+        <h2 id="result">Assessment</h2>
+        <div id="alert"></div>
+
+        <div id="conditions" class="section"></div>
+        <div id="advice" class="section"></div>
+        <div id="meds" class="section"></div>
+        <div id="notes" class="section"></div>
+
+        <div id="raw" class="section muted mono" hidden></div>
+      </section>
+    </div>
+
+    <footer>
+      <div>© Doc_GPT — NHS/CDC informed content. Not a diagnostic device. Call emergency services if you have severe or rapidly worsening symptoms.</div>
+    </footer>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const ui = {
+  gender: $("#gender"),
+  age: $("#age"),
+  symptoms: $("#symptoms"),
+  temp: $("#temp"),
+  hr: $("#hr"),
+  meds: $("#meds"),
+  analyze: $("#analyze"),
+  clear: $("#clear"),
+  alert: $("#alert"),
+  conditions: $("#conditions"),
+  advice: $("#advice"),
+  medsOut: $("#meds"),
+  medsPanel: $("#meds"),
+  notes: $("#notes"),
+  raw: $("#raw")
+};
+
+function renderBanner(kind, text) {
+  const t = text || (kind === "danger"
+    ? "Emergency warning signs detected. Seek urgent care."
+    : "No emergency red flags found.");
+  return `<div class="banner ${kind==='ok'?'ok':''}">
+    <div class="i"></div>
+    <div>${t}</div>
+  </div>`;
+}
+
+function renderChips(list) {
+  return `<div class="chips">${list.map(x => `<span class="chip">${x}</span>`).join("")}</div>`;
+}
+
+function sanitize(s) { return (s ?? "").toString(); }
+
+async function analyze() {
+  ui.alert.innerHTML = "";
+  ui.conditions.innerHTML = "";
+  ui.advice.innerHTML = "";
+  ui.medsOut.innerHTML = "";
+  ui.notes.innerHTML = "";
+  ui.raw.hidden = true; ui.raw.textContent = "";
+
+  const gender = sanitize(ui.gender.value);
+  const age = Number(ui.age.value || 0);
+  const symptoms_text = sanitize(ui.symptoms.value);
+  const thermometer_f = sanitize(ui.temp.value);
+  const heart_rate   = sanitize(ui.hr.value);
+  const meds_taken   = sanitize(ui.meds.value);
+
+  // basic guardrails
+  if (!gender || !age || !symptoms_text) {
+    ui.alert.innerHTML = renderBanner("danger", "Please provide gender, age, and symptoms.");
+    return;
+  }
+
+  ui.analyze.disabled = true; ui.analyze.textContent = "Analyzing…";
+  try {
+    const res = await fetch("http://127.0.0.1:8001/v1/triage/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gender, age, symptoms_text, thermometer_f, heart_rate, meds_taken })
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+
+    // Banner
+    if (data.red_flag) {
+      ui.alert.innerHTML = renderBanner("danger", data.red_flag_banner || "Red-flag symptoms detected. Seek emergency care.");
+    } else {
+      ui.alert.innerHTML = renderBanner("ok", "No emergency red-flags detected in your description.");
+    }
+
+    // Likely conditions
+    if (Array.isArray(data.likely_conditions) && data.likely_conditions.length) {
+      const lines = data.likely_conditions.map(c =>
+        `<li><strong>${sanitize(c.name || c)}</strong>${
+          c.p!==undefined ? ` — probability <span class="mono">${(c.p*100).toFixed(0)}%</span>` : ""
+        }</li>`);
+      ui.conditions.innerHTML = `<div class="section"><h3>Likely conditions</h3><ul class="clean">${lines.join("")}</ul></div>`;
+    }
+
+    // Advice
+    if (Array.isArray(data.advice) && data.advice.length) {
+      ui.advice.innerHTML = `<div class="section"><h3>Home care</h3><ul class="clean">${
+        data.advice.map(a => `<li>${sanitize(a)}</li>`).join("")
+      }</ul></div>`;
+    }
+
+    // Meds
+    if (Array.isArray(data.meds) && data.meds.length) {
+      ui.medsOut.innerHTML = `<div class="section"><h3>OTC medicines</h3><ul class="clean">${
+        data.meds.map(m => `<li>${sanitize(m)}</li>`).join("")
+      }</ul></div>`;
+    }
+
+    // Notes / scores
+    const chips = [];
+    if (data.notes && typeof data.notes === "object") {
+      for (const [k,v] of Object.entries(data.notes)) chips.push(`${k.toUpperCase()}=${v}`);
+    }
+    if (chips.length) ui.notes.innerHTML = `<div class="section"><h3>Clinical scores</h3>${renderChips(chips)}</div>`;
+
+    // Raw (debug)
+    if (data.raw) {
+      ui.raw.hidden = false;
+      ui.raw.textContent = JSON.stringify(data.raw, null, 2);
+    }
+
+  } catch (e) {
+    console.error(e);
+    ui.alert.innerHTML = renderBanner("danger", "Triage failed. Check that port 8001 is running and LM Studio is reachable.");
+  } finally {
+    ui.analyze.disabled = false; ui.analyze.textContent = "Analyze";
+  }
+}
+
+ui.analyze.addEventListener("click", analyze);
+ui.clear.addEventListener("click", () => {
+  ui.gender.value = ""; ui.age.value = ""; ui.symptoms.value = "";
+  ui.temp.value = ""; ui.hr.value = ""; ui.meds.value = "";
+  ui.alert.innerHTML = ""; ui.conditions.innerHTML = ""; ui.advice.innerHTML = ""; ui.medsOut.innerHTML = ""; ui.notes.innerHTML = "";
+  ui.raw.hidden = true; ui.raw.textContent = "";
+});
+</script>
+</body>
+</html>

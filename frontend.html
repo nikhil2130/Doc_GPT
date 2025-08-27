@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Doc_GPT — RAG Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0f172a;           /* slate-900 */
+      --panel: #111827;        /* slate-800 */
+      --muted: #94a3b8;        /* slate-400 */
+      --text: #e5e7eb;         /* slate-200 */
+      --accent: #22c55e;       /* green-500 */
+      --accent-2: #60a5fa;     /* blue-400 */
+      --danger: #ef4444;       /* red-500 */
+      --card: #0b1220;
+    }
+    html, body {
+      margin: 0; padding: 0; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    .wrap {
+      max-width: 880px; margin: 28px auto 64px; padding: 0 16px;
+    }
+    h1 { text-align: center; margin: 0 0 18px; letter-spacing: .3px; }
+    .card {
+      background: var(--panel); border: 1px solid #1f2937; border-radius: 14px; padding: 18px 18px 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    }
+    label { display:block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+    input[type=text], input[type=number], textarea {
+      width: 100%; box-sizing: border-box; color: var(--text);
+      background: #0b1220; border: 1px solid #1f2937; border-radius: 10px;
+      padding: 12px 12px; font-size: 14px; outline: none;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    .row { display:flex; gap:12px; align-items: center; flex-wrap: wrap; }
+    .row > * { flex: 1; min-width: 220px; }
+    .btn {
+      display:inline-flex; align-items:center; gap:8px; cursor:pointer;
+      background: #111827; border: 1px solid #1f2937; color: var(--text);
+      padding: 10px 14px; border-radius: 10px; font-weight: 600;
+      transition: transform .02s ease-in, background .15s ease;
+      user-select: none;
+    }
+    .btn:hover { background:#0b1220; }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color:#051b0d; }
+    .btn.secondary { background: var(--card); }
+    .btn.link { background: transparent; border: none; color: var(--accent-2); padding: 0; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 4px;}
+    .status { font-size: 12px; margin-left: 10px; }
+    .status.ok { color: #34d399; }
+    .status.bad { color: var(--danger); }
+    .answer {
+      white-space: pre-wrap; background:#0b1220; border:1px solid #1f2937; border-radius: 12px;
+      padding: 16px; line-height: 1.5;
+    }
+    .block { margin-top: 14px; }
+    .citations a { color: var(--accent-2); text-decoration: none; }
+    .citations a:hover { text-decoration: underline; }
+    .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
+    .danger { color: var(--danger); }
+    .muted { color: var(--muted); }
+    .footer { text-align:center; margin-top: 24px; color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Doc_GPT — Conversational RAG</h1>
+
+    <div class="card">
+      <label for="api">API Base URL</label>
+      <div class="row">
+        <input id="api" type="text" value="http://127.0.0.1:8000" />
+        <button class="btn secondary" id="btnHealth">Check /healthz</button>
+        <span id="healthStatus" class="status muted">—</span>
+      </div>
+
+      <label for="q">Your question</label>
+      <textarea id="q" spellcheck="false">I have a sore throat and mild fever. What can I do at home?</textarea>
+      <div class="hint">Tip: Ask concrete health questions. The assistant will cite NHS/CDC sources and add safety notes.</div>
+
+      <div class="row">
+        <div>
+          <label for="profile">User Profile (optional)</label>
+          <input id="profile" type="text" placeholder="e.g., male, 21, no known conditions" />
+        </div>
+        <div style="max-width:140px">
+          <label for="topk">k</label>
+          <input id="topk" type="number" min="1" max="10" step="1" value="5" />
+          <div class="hint">top‑k passages</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top: 12px;">
+        <button id="btnAsk" class="btn primary">Ask</button>
+        <button id="btnClear" class="btn">Clear</button>
+        <span id="msg" class="status muted"></span>
+      </div>
+
+      <div class="block">
+        <label>Answer</label>
+        <div id="answer" class="answer muted">—</div>
+      </div>
+
+      <div class="block">
+        <label>Citations</label>
+        <div id="cites" class="answer citations muted">—</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Built for local testing. Network calls made with the Fetch API (see MDN for <span class="mono">fetch()</span> &amp; <span class="mono">response.json()</span>). Sources are shown below each answer. <!-- MDN refs: -->
+      <!-- Using Fetch API: https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Scripting/Network_requests -->
+      <!-- Response.json(): https://developer.mozilla.org/en-US/docs/Web/API/Response/json -->
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setMsg(text, cls = "muted") {
+      const el = $("msg");
+      el.className = `status ${cls}`;
+      el.textContent = text;
+    }
+
+    function setHealth(text, ok) {
+      const el = $("healthStatus");
+      el.className = `status ${ok ? "ok" : "bad"}`;
+      el.textContent = text;
+    }
+
+    function renderAnswer(answerText) {
+      const ans = $("answer");
+      ans.classList.remove("muted");
+      // keep newlines; the box is pre-wrap
+      ans.textContent = answerText || "No answer.";
+    }
+
+    function renderCitations(cites) {
+      const box = $("cites");
+      box.classList.remove("muted");
+      if (!Array.isArray(cites) || cites.length === 0) {
+        box.innerHTML = "<em>No citations returned.</em>";
+        return;
+      }
+      const html = cites.map(c => {
+        const t = (c.title || c.url || "").toString().replace(/</g,"&lt;");
+        const u = (c.url || "#").toString();
+        return `<div>• <a href="${u}" target="_blank" rel="noopener">${t}</a></div>`;
+      }).join("");
+      box.innerHTML = html;
+    }
+
+    async function checkHealth() {
+      const base = $("api").value.trim().replace(/\/+$/,"");
+      try {
+        const r = await fetch(`${base}/healthz`, { method: "GET" });
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        const json = await r.json();
+        setHealth(`OK ✓ (${json.status || "up"})`, true);
+      } catch (e) {
+        setHealth(`Failed ✗ (${e.message})`, false);
+      }
+    }
+
+    function payload() {
+      let k = parseInt($("topk").value, 10);
+      if (isNaN(k) || k < 1) k = 5;
+      if (k > 10) k = 10;
+      return {
+        question: $("q").value.trim(),
+        user_profile: $("profile").value.trim() || null,
+        k
+      };
+    }
+
+    async function ask() {
+      const base = $("api").value.trim().replace(/\/+$/,"");
+      const body = payload();
+
+      if (!body.question) {
+        setMsg("Please type a question.", "bad");
+        return;
+      }
+
+      setMsg("Asking…", "muted");
+      $("answer").textContent = "—";
+      $("cites").textContent = "—";
+
+      try {
+        const r = await fetch(`${base}/ask`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        // Helpful handling for 422 (validation) so it’s clear what went wrong
+        if (r.status === 422) {
+          const t = await r.text();
+          setMsg("Validation error (HTTP 422). Check the JSON being sent.", "bad");
+          $("answer").innerHTML =
+            `<span class="danger">Your request was rejected by the API (422).</span>
+             <div class="block">It expects JSON like:
+             <pre class="mono">{
+  "question": "your question",
+  "user_profile": "optional string or null",
+  "k": 5
+}</pre></div>
+             <div class="hint mono">${t.replace(/</g,"&lt;")}</div>`;
+          $("cites").innerHTML = "<em>No citations.</em>";
+          return;
+        }
+
+        if (!r.ok) {
+          throw new Error(`${r.status} ${r.statusText}`);
+        }
+
+        const data = await r.json();
+        renderAnswer(data.answer || "");
+        renderCitations(data.citations || []);
+        setMsg("Done ✓", "ok");
+
+      } catch (e) {
+        setMsg(`Request failed: ${e.message}`, "bad");
+        $("answer").innerHTML = `<span class="danger">Network or server error.</span>
+          <div class="hint">Make sure the API is running at the base URL above.</div>`;
+        $("cites").innerHTML = "<em>No citations.</em>";
+      }
+    }
+
+    function clearAll() {
+      $("q").value = "";
+      $("profile").value = "";
+      $("answer").textContent = "—";
+      $("cites").textContent = "—";
+      setMsg("Cleared.", "muted");
+    }
+
+    // wire up
+    $("btnHealth").addEventListener("click", checkHealth);
+    $("btnAsk").addEventListener("click", ask);
+    $("btnClear").addEventListener("click", clearAll);
+
+    // auto‑health check on load
+    checkHealth();
+  </script>
+</body>
+</html>

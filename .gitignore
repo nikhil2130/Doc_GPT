@@ -1,0 +1,38 @@
+@'
+# --- Python / venv ---
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Local config & secrets ---
+.env
+.env.local
+.env.*.local
+
+# --- App data (rebuildable) ---
+data/flatindex/
+data/chroma/
+data/indexes/
+data/eval_runs/
+
+# If you keep raw crawl results locally, ignore them:
+data/raw/
+docs/indexers/tmp/
+
+# --- Editor/OS junk ---
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- LM Studio / local model server logs (if any) ---
+*.log
+lmstudio-*.*
+*.gguf
+
+# --- Node / web (if ever added) ---
+node_modules/
+dist/
+build/
+'@ | Set-Content -Encoding UTF8 .gitignore

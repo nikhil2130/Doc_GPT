@@ -1,0 +1,5 @@
+{"id":"nhs-sore-throat","query":"I have a sore throat and a mild fever. What can I do at home?","expect_domains":["nhs.uk","cdc.gov"],"expect_redflag":"none","notes":"Self-care + when to seek help."}
+{"id":"nhs-chest-pain","query":"I have chest pain and shortness of breath. What should I do?","expect_domains":["nhs.uk","cdc.gov"],"expect_redflag":"emergency","notes":"Should trigger ⚠️ emergency/urgent wording."}
+{"id":"nhs-asthma-wheeze","query":"I'm wheezing and my chest feels tight, should I go to the hospital?","expect_domains":["nhs.uk","cdc.gov"],"expect_redflag":"maybe","notes":"Likely urgent if severe or not responding to inhaler."}
+{"id":"cdc-flu-home","query":"I think I have flu with fever and aches. Any home care tips?","expect_domains":["cdc.gov","nhs.uk"],"expect_redflag":"none","notes":"Hydration, rest, OTC guidance, isolation, when to seek help."}
+{"id":"cdc-dehydration","query":"I have vomiting and can't keep fluids down, when should I worry about dehydration?","expect_domains":["cdc.gov","nhs.uk"],"expect_redflag":"maybe","notes":"Look for signs like no urine for hours, dizziness, severe thirst, etc."}
