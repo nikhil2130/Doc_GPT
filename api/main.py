@@ -9,7 +9,6 @@ from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from sklearn.neighbors import NearestNeighbors
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
@@ -53,37 +52,7 @@ SHOW_RETRIEVED = True
 # --------------------------------------------------------------------------------------
 # Data Models
 # --------------------------------------------------------------------------------------
-class AskRequest(BaseModel):
-    query: str = Field(..., description="User question/symptoms")
-    k: int = Field(6, ge=1, le=20, description="Number of chunks to include")
-
-
-class Citation(BaseModel):
-    n: str
-    title: str
-    url: str
-    score: str
-
-
-class RetrievedItem(BaseModel):
-    text: str
-    meta: Dict[str, Any]
-    score: float
-    rerank_score: Optional[float] = None
-    rerank_kind: Optional[str] = None
-
-
-class RedFlag(BaseModel):
-    severity: str
-    matches: List[str] = Field(default_factory=list)
-    banner: str = ""
-
-
-class AskResponse(BaseModel):
-    answer: str
-    citations: List[Citation]
-    red_flag: RedFlag
-    retrieved: Optional[List[RetrievedItem]] = None
+from .schemas import AskRequest, AskResponse, Citation, RetrievedItem, RedFlag
 
 
 # --------------------------------------------------------------------------------------
