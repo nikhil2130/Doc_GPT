@@ -1,10 +1,12 @@
-"""
-Build a compact "flat" index into data/flatindex with:
-  - embeddings.npy : float32 [N, 384]
-  - meta.json      : { texts: [str], metas: [{url,title,snippet}], embed_model, dim }
-  - nn.joblib      : sklearn NearestNeighbors (cosine)
+"""Build a compact "flat" index into ``data/flatindex``.
 
-Source docs come from data/raw/*.json produced by scripts/crawl_clean.py
+Artifacts:
+
+* ``embeddings.npy`` – float32 array ``[N, 384]`` containing chunk embeddings.
+* ``meta.json``      – list of dictionaries ``[{text,url,title,snippet,...}]``
+* ``nn.joblib``      – ``sklearn`` ``NearestNeighbors`` (cosine) index.
+
+Source docs come from ``data/raw/*.json`` produced by ``scripts/crawl_clean.py``.
 """
 from __future__ import annotations
 
@@ -52,32 +54,46 @@ def main():
 
     OUT.mkdir(parents=True, exist_ok=True)
 
-    texts: List[str] = []
-    metas: List[Dict[str, Any]] = []
-
+    chunks: List[Dict[str, Any]] = []
     for pg in tqdm(pages, desc="Chunk pages"):
         url = pg.get("url", "")
         title = pg.get("title", "")
-        for ch in chunk_text(pg.get("text","")):
-            texts.append(ch)
-            metas.append({"url": url, "title": title, "snippet": ch[:200]})
+        for ch in chunk_text(pg.get("text", "")):
+            chunks.append(
+                {
+                    "text": ch,
+                    "url": url,
+                    "title": title,
+                    "snippet": ch[:200],
+                }
+            )
 
     print(f"Loading embedding model: {EMBED_MODEL}")
     enc = SentenceTransformer(EMBED_MODEL)
-    X = enc.encode(texts, batch_size=64, show_progress_bar=True, convert_to_numpy=True, normalize_embeddings=True)
-    X = X.astype(np.float32)
+    texts = [c["text"] for c in chunks]
+    X = enc.encode(
+        texts,
+        batch_size=64,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    ).astype(np.float32)
 
     # save artifacts
     np.save(OUT / "embeddings.npy", X)
-    meta = {"texts": texts, "metas": metas, "embed_model": EMBED_MODEL, "dim": int(X.shape[1])}
-    (OUT / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    (OUT / "meta.json").write_text(
+        json.dumps(chunks, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     nn = NearestNeighbors(metric="cosine", n_neighbors=min(50, max(10, X.shape[0])))
     nn.fit(X)
     joblib.dump(nn, OUT / "nn.joblib")
 
     print(f"Saved flat index to {OUT}")
-    print(f"Indexed {len(texts)} chunks from {len(pages)} pages. Embedding dim={X.shape[1]}")
+    print(
+        f"Indexed {len(chunks)} chunks from {len(pages)} pages. Embedding dim={X.shape[1]}"
+    )
 
 if __name__ == "__main__":
     main()
