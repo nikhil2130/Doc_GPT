@@ -72,7 +72,23 @@ def _load_flat(dir_path: Path) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
         raise RuntimeError("Index not ready. Build the index first.")
 
     embeddings = np.load(emb_path)
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta_raw = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    # `meta.json` used to be a dict with separate "texts" and "metas" lists.
+    # Newer versions store a list of chunk dictionaries. Handle both for
+    # backward compatibility.
+    if isinstance(meta_raw, dict) and "texts" in meta_raw and "metas" in meta_raw:
+        texts = meta_raw.get("texts", [])
+        metas = meta_raw.get("metas", [])
+        meta: List[Dict[str, Any]] = []
+        for t, m in zip(texts, metas):
+            md = m if isinstance(m, dict) else {}
+            md = {**md, "text": t}
+            meta.append(md)
+    elif isinstance(meta_raw, list):
+        meta = meta_raw
+    else:
+        raise RuntimeError("Unrecognized meta.json format")
 
     return embeddings, meta
 
