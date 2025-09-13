@@ -1,204 +1,241 @@
-# D:\projects\Doc_GPT\utils\triage_rules.py
+# utils/triage_rules.py
 from __future__ import annotations
-import math
+
 import re
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple
 
-from .red_flags import (
-    detect_red_flags,
-    classify_red_flag_severity,
-    RED_FLAG_BANNER,   # <— use this instead of the old RED_FLAG_MSG
-)
+# Our red flags helper (you already have this file)
+from .red_flags import detect_red_flags, RED_FLAG_BANNER
 
-_TEMP_F_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*F\b", re.I)
-_TEMP_C_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*C\b", re.I)
+# -----------------------------
+# Small parsing helpers
+# -----------------------------
+_NUM_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
 
-def _parse_temperature(text: str) -> Optional[float]:
+def _to_float(val: Any) -> float | None:
     """
-    Return temperature in Fahrenheit if found, else None.
-    Accepts “101F” or “38.5C”.
+    Best-effort float parsing from free text or numbers.
+    Examples that become 101.4: "101.4", "Temp=101.4F", "fever 101.4 F".
     """
-    t = text or ""
-    m = _TEMP_F_PATTERN.search(t)
-    if m:
-        return float(m.group(1))
-    m = _TEMP_C_PATTERN.search(t)
-    if m:
-        c = float(m.group(1))
-        return c * 9.0 / 5.0 + 32.0
-    return None
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip()
+    m = _NUM_RE.search(s)
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except Exception:
+        return None
 
-# --- Simple clinical scores from plain text (heuristic) ----------------------
+def _has(token: str, text: str) -> bool:
+    return re.search(rf"\b{re.escape(token)}\b", text, flags=re.I) is not None
 
-def feverpain_from_text(text: str) -> int:
+def _any(tokens: List[str], text: str) -> bool:
+    return any(_has(t, text) for t in tokens)
+
+
+# -----------------------------
+# Symptom scores (very lightweight heuristics)
+# -----------------------------
+def feverpain_from_text(text: str) -> Tuple[int, Dict[str, Any]]:
     """
-    Very soft FEVERPAIN approximation from free text:
-      F (fever), P (rapidly within 3 days – ignored here), A (puss/tonsils – ignored),
-      I (severely Inflamed tonsils – proxy: 'very sore throat'),
-      N (No cough)
-    We only score fever and absence of cough reliably from free text.
+    FEVERPAIN heuristic (0–5). We don’t try to be perfect—just extract a few
+    common cues from text to demonstrate the flow.
+    Score +1 each:
+      - Fever (we treat >=100.4F as fever if we find a number with F/°F or the word 'fever')
+      - Absence of cough
+      - Rapid onset / severe tonsillar pain (keywords)
+      - Pus/exudate words
+      - Inflamed/tender lymph nodes (neck glands)
     """
-    t = (text or "").lower()
+    t = text.lower()
     score = 0
-    if "fever" in t or _parse_temperature(t) and _parse_temperature(t) >= 100.4:
-        score += 1
-    if "no cough" in t or ("cough" not in t and "no" in t):
-        score += 1
-    if "very sore throat" in t or "severe sore throat" in t or "pain swallowing" in t:
-        score += 1
-    return min(score, 5)
+    notes = {}
 
-def centor_from_text(text: str, age: Optional[int] = None) -> int:
+    # Fever: explicit number like 101F or keyword "fever"
+    has_fever_kw = "fever" in t
+    temp_matches = re.findall(r"(\d{2,3}(?:\.\d+)?)\s*°?\s*f", t)
+    tempF = float(temp_matches[0]) if temp_matches else None
+    fever_by_temp = tempF is not None and tempF >= 100.4
+    if has_fever_kw or fever_by_temp:
+        score += 1
+        notes["fever"] = tempF if tempF is not None else True
+
+    # Absence of cough
+    no_cough = ("no cough" in t) or ("without cough" in t) or ("absent cough" in t)
+    if no_cough:
+        score += 1
+        notes["no_cough"] = True
+
+    # Rapid onset / severe pain
+    if _any(["rapid", "sudden", "severe pain", "very sore", "very painful"], t):
+        score += 1
+        notes["rapid_or_severe"] = True
+
+    # Exudate / pus
+    if _any(["exudate", "pus", "white patches", "tonsillar exudate"], t):
+        score += 1
+        notes["exudate"] = True
+
+    # Tender glands
+    if _any(["tender glands", "swollen glands", "neck lymph", "lymph node"], t):
+        score += 1
+        notes["lymph_nodes"] = True
+
+    return score, notes
+
+
+def centor_from_text(text: str, age: int | None = None) -> Tuple[int, Dict[str, Any]]:
     """
-    Centor (simplified):
-      +1 tonsillar exudate (proxy: 'white spots', 'pus')
-      +1 tender anterior cervical nodes (proxy: 'swollen glands')
-      +1 fever > 38C/100.4F (from text/temperature)
-      +1 absence of cough
-    McIsaac age adjustment:
-      3–14: +1, 15–44: 0, >=45: -1
+    Centor (0–4) – rough text cues:
+      +1: tonsillar exudates
+      +1: tender anterior cervical nodes
+      +1: fever
+      +1: absence of cough
+    (Age adjustments are handled downstream as +1 / 0 / -1 in many variants; here
+     we keep raw 0–4 and only report the age band in notes.)
     """
-    t = (text or "").lower()
+    t = text.lower()
     score = 0
-    if "white spots" in t or "exudate" in t or "pus" in t:
+    notes = {}
+
+    if _any(["exudate", "pus", "white patches", "tonsillar exudate"], t):
         score += 1
-    if "swollen glands" in t or "tender glands" in t or "neck glands" in t:
+        notes["exudate"] = True
+
+    if _any(["tender glands", "tender nodes", "anterior cervical", "neck lymph"], t):
         score += 1
-    temp_f = _parse_temperature(t)
-    if "fever" in t or (temp_f is not None and temp_f >= 100.4):
+        notes["tender_nodes"] = True
+
+    if "fever" in t or re.search(r"\b(10[0-9](?:\.\d+)?)\s*°?\s*f\b", t):
         score += 1
-    if "no cough" in t or ("cough" not in t and "no" in t):
+        notes["fever"] = True
+
+    if ("no cough" in t) or ("without cough" in t) or ("absent cough" in t):
         score += 1
+        notes["no_cough"] = True
 
     if age is not None:
-        if 3 <= age <= 14:
-            score += 1
-        elif age >= 45:
-            score -= 1
-    return score
+        if age < 15:
+            notes["age_band"] = "<15"
+        elif age <= 44:
+            notes["age_band"] = "15–44"
+        else:
+            notes["age_band"] = "≥45"
 
-# --- Condition guesser -------------------------------------------------------
+    return score, notes
 
-def guess_conditions(
-    text: str,
-    age: Optional[int] = None,
-) -> List[Tuple[str, float]]:
+
+# -----------------------------
+# Condition guessing (toy probabilities)
+# -----------------------------
+def guess_conditions(fp_score: int, centor_score: int) -> List[Dict[str, Any]]:
     """
-    Extremely lightweight condition prior. Returns list of (name, probability).
-    We use FEVERPAIN and CENTOR to bias between viral vs strep pharyngitis.
+    Produce a tiny ranked list with toy probabilities for demo purposes.
+    Higher FEVERPAIN / Centor nudges toward strep.
     """
-    t = (text or "").lower()
-    fp = feverpain_from_text(t)
-    ce = centor_from_text(t, age=age)
-
-    # Default priors
-    p_viral = 0.6
-    p_strep = 0.3
-    p_other = 0.1
-
-    # Tilt with scores
-    if ce >= 3 or fp >= 4:
-        p_strep += 0.25
-        p_viral -= 0.20
-    elif ce <= 1 and fp <= 1:
-        p_viral += 0.20
-        p_strep -= 0.15
-
-    # Clamp and renormalize
-    p_viral = max(0.0, min(1.0, p_viral))
-    p_strep = max(0.0, min(1.0, p_strep))
-    p_other = max(0.0, min(1.0, 1.0 - (p_viral + p_strep)))
-    Z = p_viral + p_strep + p_other
-    if Z <= 0:
-        p_viral, p_strep, p_other = 0.6, 0.3, 0.1
-        Z = 1.0
+    # crude mapping
+    strep_p = 0.10 + 0.10 * fp_score + 0.10 * centor_score
+    strep_p = max(0.0, min(0.90, strep_p))
+    viral_p = max(0.0, 1.0 - strep_p)
 
     return [
-        ("Viral pharyngitis (common cold/flu)", round(p_viral / Z, 3)),
-        ("Streptococcal pharyngitis (strep throat)", round(p_strep / Z, 3)),
-        ("Other upper-respiratory causes", round(p_other / Z, 3)),
+        {"name": "Streptococcal pharyngitis (strep throat)", "p": round(strep_p, 2)},
+        {"name": "Viral pharyngitis (common cold/flu)", "p": round(viral_p, 2)},
+        {"name": "Other upper-respiratory causes", "p": round(1.0 - (strep_p + viral_p), 2)},
     ]
 
-# --- Red-flag wrapper ---------------------------------------------------------
 
-def red_flag_assessment(text: str) -> Dict[str, str]:
+def first_aid_and_meds(age: int | None, text: str) -> Tuple[List[str], List[str]]:
     """
-    Return { present: bool, severity: 'none'|'urgent'|'emergency', banner: str }
+    Very conservative, OTC-only suggestions. This is **not** medical advice.
     """
-    present = detect_red_flags(text or "")
-    if not present:
-        return {"present": False, "severity": "none", "banner": ""}
-    severity = classify_red_flag_severity(text or "")
-    banner = RED_FLAG_BANNER
-    return {"present": True, "severity": severity, "banner": banner}
-
-# --- Main engine used by api/triage.py ---------------------------------------
-
-def analyze_case(
-    gender: str,
-    age: int,
-    symptoms_text: str,
-    thermometer_f: Optional[float] = None,
-    heart_rate: Optional[int] = None,
-    meds_taken: Optional[str] = None,
-) -> Dict:
-    """
-    Pure-python rules layer (fast, deterministic).
-    The API layer may optionally add an LLM step on top, but this function
-    must be importable without touching OpenAI/LM Studio.
-    """
-    age = int(age) if age is not None else None
-    text = symptoms_text or ""
-
-    # Scores
-    fp = feverpain_from_text(text)
-    ce = centor_from_text(text, age=age)
-
-    # Temperature from free text as fallback
-    tf = thermometer_f
-    if tf is None:
-        tf = _parse_temperature(text)
-
-    # Likely conditions
-    conds = guess_conditions(text, age=age)
-
-    # Advice bundle
-    advice: List[str] = [
+    advice = [
         "Rest and hydrate (warm fluids can soothe the throat).",
         "Gargle warm salt water (not for young children).",
-        "Avoid smoking/smoky places.",
-        "Honey/lemon for cough or throat irritation (not for <1 year old).",
-        "If symptoms worsen quickly or persist >1 week, seek care.",
+        "Avoid smoking/smoky places; consider honey/lemon for cough or throat irritation (not for <1 year old).",
+        "Seek urgent care if symptoms are severe, rapidly worsening, or new red flags appear."
     ]
-    meds: List[str] = [
+    meds = [
         "Paracetamol/acetaminophen for fever/pain (follow label dosing).",
         "Ibuprofen if tolerated (with food); avoid if you have ulcers or kidney problems.",
-        "Throat lozenges or sprays for temporary relief (age-appropriate).",
+        "Throat lozenges or sprays for symptomatic relief (age-appropriate)."
     ]
+    return advice, meds
 
-    # Red-flags
-    rf = red_flag_assessment(text)
 
-    return {
-        "severity": rf["severity"] if rf["present"] else "none",
-        "red_flag": rf["present"],
-        "red_flag_banner": rf["banner"] if rf["present"] else "",
-        "likely_conditions": [{ "name": n, "p": p } for n, p in conds],
+# -----------------------------
+# Public API
+# -----------------------------
+def analyze_case(**payload: Any) -> Dict[str, Any]:
+    """
+    Main entrypoint used by api/triage.py.
+    Accepts flexible keyword args:
+      - gender: str | None
+      - age: int | None
+      - symptoms_text: str  (required)
+      - thermometer_f: float | str | None
+      - heart_rate: int | str | None
+      - meds_taken: str | None
+      - (and any other fields; safely ignored)
+    Returns a dict safe to JSON-serialize.
+    """
+    gender = (payload.get("gender") or "").strip().lower() or None
+    age = payload.get("age")
+    try:
+        age = int(age) if age is not None else None
+    except Exception:
+        age = None
+
+    text = payload.get("symptoms_text") or payload.get("text") or ""
+    text = str(text)
+
+    tempF = payload.get("thermometer_f")
+    tempF = _to_float(tempF)
+
+    heart_rate_raw = payload.get("heart_rate")
+    try:
+        heart_rate = int(heart_rate_raw) if heart_rate_raw is not None else None
+    except Exception:
+        heart_rate = None
+
+    meds_taken = payload.get("meds_taken")
+    meds_taken = str(meds_taken) if meds_taken is not None else None
+
+    # Compute basic scores
+    fp, fp_notes = feverpain_from_text(text)
+    centor, centor_notes = centor_from_text(text, age=age)
+
+    # Red flags
+    flags = detect_red_flags(text)
+    red_flag = len(flags) > 0
+    severity = "emergency" if red_flag else "none"
+
+    # Guess conditions & basic advice
+    likely = guess_conditions(fp, centor)
+    advice, meds = first_aid_and_meds(age, text)
+
+    # Build response
+    out: Dict[str, Any] = {
+        "severity": severity,
+        "red_flag": red_flag,
+        "red_flag_banner": RED_FLAG_BANNER if red_flag else "",
+        "likely_conditions": likely,
         "advice": advice,
         "meds": meds,
-        "notes": [
-            f"FEVERPAIN={fp}",
-            f"CENTOR={ce}",
-            f"TempF={'%.1f' % tf if tf is not None else 'n/a'}",
-        ],
-        "raw": {
-            "feverpain": fp,
-            "centor": ce,
-            "thermometer_f": tf,
+        "notes": {
+            "FEVERPAIN": fp,
+            "CENTOR": centor,
+            "TempF": tempF,
             "heart_rate": heart_rate,
             "meds_taken": meds_taken,
         },
+        "raw": {
+            "feverpain": fp_notes,
+            "centor": centor_notes,
+        },
     }
-
-# Re-export for API layer convenience
-RED_FLAG_BANNER = RED_FLAG_BANNER
+    return out

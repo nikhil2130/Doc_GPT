@@ -1,227 +1,358 @@
-# D:\projects\Doc_GPT\api\main.py
+# api/main.py
 from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Dict, Any, Tuple
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from sklearn.neighbors import NearestNeighbors
+from rank_bm25 import BM25Okapi
+from sentence_transformers import SentenceTransformer
+from tenacity import retry, wait_exponential, stop_after_attempt
 
-from pydantic import BaseModel
-from .schemas import (
-    AskRequest, AskResponse, IntakeQuery, IntakeResponse, Citation, RedFlag, ConditionCandidate
-)
-from utils import red_flags as rf
-from utils.triage_rules import feverpain_from_text, centor_from_text, guess_conditions, red_flag_assessment
+# OpenAI-compatible client (for LM Studio or OpenAI)
+try:
+    from openai import OpenAI  # openai>=1.x
+except Exception:  # fallback if older SDK is present
+    OpenAI = None
 
-from utils.first_aid import steps_for
-from utils.otc import otc_suggestions
-from utils.followups import follow_ups_for
+# Local utils
+from utils.red_flags import detect_red_flags, classify_red_flag_severity, RED_FLAG_BANNER
 
+
+# --------------------------------------------------------------------------------------
+# Settings
+# --------------------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
-WEB_DIR = ROOT / "web"
-DATA_DIR = ROOT / "data"
-FLAT_DIR = Path(os.getenv("FLAT_INDEX_DIR", str(DATA_DIR / "flatindex")))
-EMBED_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+FLAT_DIR = Path(os.getenv("FLAT_INDEX_DIR") or ROOT / "data" / "flatindex")
+EMB_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
-# --- Minimal flat retriever ---------------------------------------------------
-# expects files built by scripts/build_flat_index.py: embeddings.npy, meta.json
-class FlatIndex:
-    def __init__(self, path: Path):
-        self.path = path
-        self.ok = False
-        self.emb = None  # (N, d) np.float32
-        self.meta = []   # list of dicts with url, title, snippet, chunk_index
-        self.model = None
+# Hybrid (dense + BM25) controls
+HYBRID = True
+ALPHA = float(os.getenv("HYBRID_ALPHA", "0.40"))  # weight for dense side in [0,1]
 
-        try:
-            efile = self.path / "embeddings.npy"
-            mfile = self.path / "meta.json"
-            if not (efile.exists() and mfile.exists()):
-                return
-            self.emb = np.load(str(efile))
-            self.meta = json.loads(mfile.read_text(encoding="utf-8"))
-            # lazy load model
-            from sentence_transformers import SentenceTransformer
-            self.model = SentenceTransformer(EMBED_MODEL_NAME)
-            self.ok = True
-        except Exception as e:
-            print("[flat] failed to load:", repr(e))
-            self.ok = False
+# Reranker (optional)
+RERANK = True
+RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+RERANK_TOP_M = int(os.getenv("RERANK_TOP_M", "12"))
 
-    def search(self, query: str, k: int = 6) -> List[Tuple[float, dict]]:
-        if not self.ok:
-            return []
-        vec = self.model.encode([query], normalize_embeddings=True)
-        # cosine similarity against normalized embeddings
-        E = self.emb
-        q = vec[0].astype(np.float32)
-        sims = (E @ q).astype(np.float32)  # (N,)
-        top_idx = np.argsort(-sims)[: max(1, k)]
+# LLM (LM Studio or OpenAI-compatible)
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:1234/v1")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "lm-studio")  # any non-empty string for LM Studio
+LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama-3.1-8b-instruct")
+
+# Misc
+SHOW_RETRIEVED = True
+
+
+# --------------------------------------------------------------------------------------
+# Data Models
+# --------------------------------------------------------------------------------------
+class AskRequest(BaseModel):
+    query: str = Field(..., description="User question/symptoms")
+    k: int = Field(6, ge=1, le=20, description="Number of chunks to include")
+
+
+class Citation(BaseModel):
+    n: str
+    title: str
+    url: str
+    score: str
+
+
+class RetrievedItem(BaseModel):
+    text: str
+    meta: Dict[str, Any]
+    score: float
+    rerank_score: Optional[float] = None
+    rerank_kind: Optional[str] = None
+
+
+class RedFlag(BaseModel):
+    severity: str
+    matches: List[str] = Field(default_factory=list)
+    banner: str = ""
+
+
+class AskResponse(BaseModel):
+    answer: str
+    citations: List[Citation]
+    red_flag: RedFlag
+    retrieved: Optional[List[RetrievedItem]] = None
+
+
+# --------------------------------------------------------------------------------------
+# Load flat index
+#   - embeddings.npy: dense vectors (N, dim)
+#   - meta.json     : list of {text, url, title, ...} for each chunk
+#   - nn.joblib     : (optional) prebuilt NearestNeighbors index (not required)
+# --------------------------------------------------------------------------------------
+def _load_flat(dir_path: Path) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+    if not dir_path.exists():
+        raise RuntimeError(f"Flat index dir not found: {dir_path}")
+
+    emb_path = dir_path / "embeddings.npy"
+    meta_path = dir_path / "meta.json"
+
+    if not emb_path.exists() or not meta_path.exists():
+        raise RuntimeError("Index not ready. Build the index first.")
+
+    embeddings = np.load(emb_path)
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    return embeddings, meta
+
+
+def _build_bm25(corpus: List[str]) -> BM25Okapi:
+    # very simple whitespace tokenization
+    tokenized = [doc.lower().split() for doc in corpus]
+    return BM25Okapi(tokenized)
+
+
+# --------------------------------------------------------------------------------------
+# RAG components
+# --------------------------------------------------------------------------------------
+class RAGEngine:
+    def __init__(self, flat_dir: Path):
+        self.dir = flat_dir
+        self.embeddings, self.meta = _load_flat(flat_dir)
+        self.N, self.dim = self.embeddings.shape
+        # Embedding model
+        self.emb_model = SentenceTransformer(EMB_MODEL_NAME)
+        # Dense index
+        self.nn = NearestNeighbors(metric="cosine", algorithm="auto")
+        self.nn.fit(self.embeddings)
+        # BM25
+        self.texts = [m.get("text") or m.get("snippet") or "" for m in self.meta]
+        self.bm25 = _build_bm25(self.texts) if HYBRID else None
+
+        # Optional reranker
+        self.reranker = None
+        if RERANK:
+            try:
+                from sentence_transformers import CrossEncoder
+                self.reranker = CrossEncoder(RERANK_MODEL)
+                self.rerank_kind = "ce"
+            except Exception:
+                self.reranker = None
+                self.rerank_kind = None
+
+        # LLM client
+        self.llm = None
+        if OpenAI is not None:
+            try:
+                self.llm = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+            except Exception:
+                self.llm = None
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "status": "ok",
+            "backend": "flat",
+            "mode": "hybrid" if HYBRID else "dense",
+            "alpha": ALPHA,
+            "reranker": "enabled" if self.reranker else "disabled",
+            "rerank_model": RERANK_MODEL if self.reranker else "",
+            "rerank_top_m": RERANK_TOP_M if self.reranker else 0,
+            "model": EMB_MODEL_NAME,
+            "count": self.N,
+            "dim": self.dim,
+            "dir": str(self.dir.resolve()),
+            "bm25": bool(self.bm25),
+        }
+
+    def embed_query(self, q: str) -> np.ndarray:
+        v = self.emb_model.encode([q], normalize_embeddings=True)
+        return v[0]
+
+    def search(self, q: str, k: int) -> List[Tuple[int, float]]:
+        """Return [(idx, score)] of top-k by hybrid score."""
+        qv = self.embed_query(q)
+
+        # Dense (cosine sim = 1 - distance)
+        dists, idxs = self.nn.kneighbors([qv], n_neighbors=min(max(k * 2, 10), self.N))
+        idxs = idxs[0]
+        sims = 1.0 - dists[0]  # convert cosine distance to similarity
+
+        dense_scores = {int(i): float(s) for i, s in zip(idxs, sims)}
+
+        if self.bm25 is not None:
+            bm25_scores = self.bm25.get_scores(q.lower().split())
+            # normalize both sides to [0,1]
+            dvals = np.array(list(dense_scores.values()))
+            dnorm = (dvals - dvals.min()) / (dvals.ptp() + 1e-9)
+
+            bvals = np.array(bm25_scores)
+            bnorm = (bvals - bvals.min()) / (bvals.ptp() + 1e-9)
+
+            # hybrid score
+            combined: Dict[int, float] = {}
+            for i, _ in enumerate(self.meta):
+                ds = dnorm[list(dense_scores.keys()).index(i)] if i in dense_scores else 0.0
+                bs = float(bnorm[i])
+                combined[i] = ALPHA * ds + (1.0 - ALPHA) * bs
+            # sort
+            top = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:k]
+            return top
+        else:
+            # dense only
+            top = sorted(dense_scores.items(), key=lambda x: x[1], reverse=True)[:k]
+            return top
+
+    def rerank(self, q: str, candidates: List[Tuple[int, float]]) -> List[Tuple[int, float, float]]:
+        """Return [(idx, hybrid_score, rerank_score)]"""
+        if not self.reranker:
+            return [(i, s, None) for i, s in candidates]
+
+        pair_inputs = [(q, self.meta[i].get("text") or self.texts[i]) for i, _ in candidates[:RERANK_TOP_M]]
+        scores = self.reranker.predict(pair_inputs).tolist()
         out = []
-        for i in top_idx.tolist():
-            m = self.meta[i]
-            out.append((float(sims[i]), m))
-        return out
+        for (i, s), rr in zip(candidates[:RERANK_TOP_M], scores):
+            out.append((i, s, float(rr)))
+        # keep ordering by rerank score, then hybrid score
+        out.sort(key=lambda x: (x[2], x[1]), reverse=True)
+        return out[: len(candidates)]
 
-flat = FlatIndex(FLAT_DIR)
-if flat.ok:
-    print(f"[flat] ready: N={flat.emb.shape[0]}, dim={flat.emb.shape[1]} at {FLAT_DIR}")
-else:
-    print(f"[flat] NOT READY (missing {FLAT_DIR})")
+    @retry(wait=wait_exponential(min=1, max=8), stop=stop_after_attempt(3))
+    def call_llm(self, question: str, contexts: List[Dict[str, str]]) -> str:
+        """Call a local LLM through OpenAI-compatible API to synthesize the answer."""
+        if not self.llm:
+            # best-effort fallback if no client
+            joined = "\n\n".join([f"[{i+1}] {c['title']} — {c['url']}\n{c['text']}" for i, c in enumerate(contexts)])
+            return f"I'll summarize from the provided sources:\n\n{joined}\n\n(Citations above.)\n\n—\nThis is general information, not medical advice. For personal guidance, consult a clinician."
 
-# --- FastAPI app --------------------------------------------------------------
-app = FastAPI(title="Doc_GPT")
+        sys_prompt = (
+            "You are Doc_GPT, a careful medical assistant. Use ONLY the provided snippets. "
+            "Write concise, plain-English guidance. End with a short disclaimer. "
+            "When you reference a source, place a bracketed number like [1], [2], ... that matches the provided context list."
+        )
 
+        ctx_lines = []
+        for i, c in enumerate(contexts, start=1):
+            ctx_lines.append(f"[{i}] {c['title']} | {c['url']}\n{c['text']}")
+        ctx_block = "\n\n".join(ctx_lines)
+
+        user_prompt = (
+            f"Question: {question}\n\n"
+            f"Context (numbered):\n{ctx_block}\n\n"
+            "Instructions:\n"
+            "- Synthesize an answer grounded in the snippets above.\n"
+            "- Include bracketed citation numbers (e.g., [1], [2]) wherever claims are supported.\n"
+            "- If red-flag symptoms are present in the question, remind the user to seek urgent care.\n"
+            "- Finish with: “—\\nThis is general information, not medical advice. For personal guidance, consult a clinician.”"
+        )
+
+        resp = self.llm.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=600,
+        )
+        return resp.choices[0].message.content or ""
+
+    def answer(self, q: str, k: int) -> AskResponse:
+        # 1) retrieve
+        raw = self.search(q, k=max(k * 2, 10))
+        ranked = self.rerank(q, raw)
+        top = ranked[:k]
+
+        # 2) build contexts & citations
+        contexts: List[Dict[str, str]] = []
+        citations: List[Citation] = []
+        retrieved: List[RetrievedItem] = []
+
+        for i, (idx, score, rr) in enumerate(top, start=1):
+            m = self.meta[idx]
+            title = (m.get("title") or "").strip() or "Untitled"
+            url = m.get("url") or ""
+            text = m.get("text") or m.get("snippet") or ""
+            contexts.append({"title": title, "url": url, "text": text})
+            citations.append(Citation(n=str(i), title=title, url=url, score=f"{score:.3f}"))
+            retrieved.append(
+                RetrievedItem(
+                    text=text,
+                    meta={"url": url, "title": title, "domain": m.get("domain"), "topic": m.get("topic"), "snippet": m.get("snippet"), "chunk_index": m.get("chunk_index")},
+                    score=float(score),
+                    rerank_score=float(rr) if rr is not None else None,
+                    rerank_kind=getattr(self, "rerank_kind", None),
+                )
+            )
+
+        # 3) generate draft with LLM
+        draft = self.call_llm(q, contexts)
+
+        # 4) red-flag pass
+        red = RedFlag(
+            severity=classify_red_flag_severity(q),
+            matches=[],
+            banner=RED_FLAG_BANNER if detect_red_flags(q) else "",
+        )
+
+        # 5) return
+        return AskResponse(
+            answer=draft,
+            citations=citations,
+            red_flag=red,
+            retrieved=retrieved if SHOW_RETRIEVED else None,
+        )
+
+
+# --------------------------------------------------------------------------------------
+# FastAPI app
+# --------------------------------------------------------------------------------------
+app = FastAPI(title="Doc_GPT API", version="0.1.0")
+
+# CORS: allow local UI/dev ports
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
+    allow_origins=[
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# serve /web
-if WEB_DIR.exists():
-    app.mount("/web", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+# Initialize engine at import time
+try:
+    ENGINE = RAGEngine(FLAT_DIR)
+except Exception as e:
+    ENGINE = None
+    INIT_ERR = e
+else:
+    INIT_ERR = None
 
-# --- Small utils for composing responses -------------------------------------
-
-def build_citations(hits: List[Tuple[float, dict]]) -> List[Citation]:
-    cits: List[Citation] = []
-    for i, (score, meta) in enumerate(hits, 1):
-        cits.append(Citation(n=i, title=str(meta.get("title") or "Source"),
-                             url=str(meta.get("url") or ""), score=round(float(score), 3)))
-    return cits
-
-def short_answer_from_docs(query: str, hits: List[Tuple[float, dict]]) -> str:
-    """
-    Extremely lightweight composer: pull a few useful snippets and stitch them.
-    Keeps LLM optional — your LM Studio can be wired later if you want.
-    """
-    lines: List[str] = [f"I’ll summarise from the retrieved sources:"]
-    used = 0
-    for score, meta in hits[:4]:
-        snip = (meta.get("snippet") or meta.get("title") or "").strip()
-        if not snip:
-            continue
-        # basic clean
-        snip = snip.replace("\n", " ")
-        lines.append(f"• {snip[:320]}…")
-        used += 1
-    if not used:
-        lines.append("• (No relevant snippet was retrieved.)")
-    lines.append("")
-    lines.append("Citations are listed below.")
-    lines.append("—")
-    lines.append("This is general information, not medical advice.")
-    return "\n".join(lines)
-
-# --- Endpoints ----------------------------------------------------------------
 
 @app.get("/healthz")
-def healthz():
-    return {
-        "status": "ok" if flat.ok else "index-missing",
-        "backend": "flat",
-        "model": EMBED_MODEL_NAME,
-        "count": int(flat.emb.shape[0]) if flat.ok else 0,
-        "dim": int(flat.emb.shape[1]) if flat.ok else 0,
-        "dir": str(FLAT_DIR),
-    }
+def healthz() -> Dict[str, Any]:
+    if ENGINE is None:
+        return {
+            "status": "error",
+            "detail": str(INIT_ERR) if INIT_ERR else "unknown",
+        }
+    return ENGINE.status()
+
 
 @app.post("/ask", response_model=AskResponse)
-def ask(req: AskRequest):
-    if not flat.ok:
+def ask(req: AskRequest) -> AskResponse:
+    if ENGINE is None:
         raise HTTPException(status_code=503, detail="Index not ready. Build the index first.")
-
-    hits = flat.search(req.query, k=req.k)
-    cits = build_citations(hits)
-    # red-flag banner
-    severity, matches = ("emergency", ["emergency triggers detected"]) if rf.detect_red_flags(req.query) else ("none", [])
-    banner = rf.RED_FLAG_MSG if severity != "none" else ""
-    ans = short_answer_from_docs(req.query, hits)
-
-    return AskResponse(
-        answer=ans,
-        citations=cits,
-        red_flag=RedFlag(severity=severity, matches=matches, banner=banner),
-    )
-
-@app.post("/intake", response_model=IntakeResponse)
-def intake(q: IntakeQuery):
-    if not flat.ok:
-        raise HTTPException(status_code=503, detail="Index not ready. Build the index first.")
-
-    # Build a retrieval query string from structured info
-    profile = q.profile
-    vitals = q.vitals
-    s_list = [s.strip() for s in (q.symptoms or []) if s.strip()]
-    joined_symptoms = ", ".join(s_list) if s_list else "unspecified symptoms"
-
-    parts = [
-        f"Gender: {profile.gender}",
-        f"Age: {profile.age}",
-        f"Symptoms: {joined_symptoms}",
-    ]
-    if vitals and vitals.temperature_c:
-        parts.append(f"T={vitals.temperature_c:.1f}C")
-
-    query = f"Clinical triage for: " + "; ".join(parts) + f". Notes: {q.free_text or ''}"
-    hits = flat.search(query, k=q.k)
-    cits = build_citations(hits)
-
-    # Condition ranking (heuristic + doc titles)
-    doc_titles = [h[1].get("title") or "" for h in hits]
-    candidates = guess_conditions(q.free_text, s_list, doc_titles)
-
-    # First aid + OTC
-    fa: List[str] = []
-    for name, _conf in candidates[:2] or [("General health advice", 0.3)]:
-        fa.extend(steps_for(name))
-    otc = otc_suggestions(age=profile.age, gender=profile.gender, suspected=[c[0] for c in candidates])
-
-    # Follow-up questions
-    fups = follow_ups_for([c[0] for c in candidates])
-
-    # Red flags
-    severity, matches = red_flag_assessment(q.free_text + " " + " ".join(s_list))
-    banner = rf.RED_FLAG_MSG if severity != "none" else ""
-
-    # Compose a brief narrative answer
-    top_line = "Based on your details, here’s an initial nurse‑style summary:"
-    bullet_conditions = "\n".join([f"• {name} — confidence {conf:.0%}" for name, conf in candidates]) if candidates else "• No clear condition detected."
-    narrative = "\n".join([
-        top_line,
-        bullet_conditions,
-        "",
-        "Immediate self‑care (first aid):",
-        *[f"• {s}" for s in fa],
-        "",
-        "Over‑the‑counter options (if suitable for you):",
-        *[f"• {s}" for s in otc],
-        "",
-        "Next questions I have for you:",
-        *[f"• {x}" for x in fups],
-        "",
-        "Citations are listed below. This is general information, not medical advice."
-    ])
-
-    return IntakeResponse(
-        condition_candidates=[ConditionCandidate(name=n, confidence=c) for n, c in candidates],
-        first_aid=fa,
-        otc=otc,
-        follow_ups=fups,
-        answer=narrative,
-        citations=cits,
-        red_flag=RedFlag(severity=severity, matches=matches, banner=banner),
-    )
-
-# Index.html convenience
-@app.get("/", response_class=HTMLResponse)
-def root():
-    if (WEB_DIR / "index.html").exists():
-        return FileResponse(str(WEB_DIR / "index.html"))
-    return HTMLResponse("<h3>Doc_GPT API is running. Open /web/index.html for the UI.</h3>")
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=422, detail="Missing 'query'")
+    try:
+        return ENGINE.answer(req.query.strip(), req.k)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Request failed: {e!r}")
