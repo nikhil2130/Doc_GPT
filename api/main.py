@@ -13,6 +13,7 @@ from sklearn.neighbors import NearestNeighbors
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 from tenacity import retry, wait_exponential, stop_after_attempt
+from dotenv import load_dotenv
 
 # OpenAI-compatible client (for LM Studio or OpenAI)
 try:
@@ -22,6 +23,9 @@ except Exception:  # fallback if older SDK is present
 
 # Local utils
 from utils.red_flags import detect_red_flags, classify_red_flag_severity, RED_FLAG_BANNER
+
+# Load environment variables from a local .env file if present
+load_dotenv()
 
 
 # --------------------------------------------------------------------------------------
