@@ -9,10 +9,15 @@ from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sklearn.neighbors import NearestNeighbors
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 from tenacity import retry, wait_exponential, stop_after_attempt
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parents[1]
 
 # OpenAI-compatible client (for LM Studio or OpenAI)
 try:
@@ -23,12 +28,16 @@ except Exception:  # fallback if older SDK is present
 # Local utils
 from utils.red_flags import detect_red_flags, classify_red_flag_severity, RED_FLAG_BANNER
 
+# Load environment variables from repo-local .env files if present
+load_dotenv(ROOT / ".env", override=False)
+load_dotenv(ROOT / ".env.local", override=False)
+
 
 # --------------------------------------------------------------------------------------
 # Settings
 # --------------------------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[1]
 FLAT_DIR = Path(os.getenv("FLAT_INDEX_DIR") or ROOT / "data" / "flatindex")
+WEB_DIR = ROOT / "web"
 EMB_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 # Hybrid (dense + BM25) controls
@@ -295,6 +304,9 @@ class RAGEngine:
 # --------------------------------------------------------------------------------------
 app = FastAPI(title="Doc_GPT API", version="0.1.0")
 
+if WEB_DIR.exists():
+    app.mount("/web", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+
 # CORS: allow local UI/dev ports
 app.add_middleware(
     CORSMiddleware,
@@ -308,6 +320,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Redirect root to the web UI when available
+@app.get("/", include_in_schema=False)
+def serve_root() -> Any:
+    if WEB_DIR.exists():
+        return RedirectResponse(url="/web/index.html")
+    return {"status": "ok"}
 
 # Initialize engine at import time
 try:
