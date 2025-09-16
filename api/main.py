@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sklearn.neighbors import NearestNeighbors
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
@@ -23,6 +24,10 @@ except Exception:  # fallback if older SDK is present
 
 # Local utils
 from utils.red_flags import detect_red_flags, classify_red_flag_severity, RED_FLAG_BANNER
+from .config import get_settings, iter_existing_env_files
+
+settings = get_settings()
+ENV_FILES_LOADED = tuple(str(path) for path in iter_existing_env_files())
 
 # Load environment variables from a local .env file if present
 load_dotenv()
@@ -31,26 +36,26 @@ load_dotenv()
 # --------------------------------------------------------------------------------------
 # Settings
 # --------------------------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[1]
-FLAT_DIR = Path(os.getenv("FLAT_INDEX_DIR") or ROOT / "data" / "flatindex")
-EMB_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+FLAT_DIR = settings.flat_index_dir
+WEB_DIR = settings.web_dir
+EMB_MODEL_NAME = settings.embedding_model
 
 # Hybrid (dense + BM25) controls
 HYBRID = True
-ALPHA = float(os.getenv("HYBRID_ALPHA", "0.40"))  # weight for dense side in [0,1]
+ALPHA = max(0.0, min(1.0, settings.hybrid_alpha))  # weight for dense side in [0,1]
 
 # Reranker (optional)
 RERANK = True
-RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-RERANK_TOP_M = int(os.getenv("RERANK_TOP_M", "12"))
+RERANK_MODEL = settings.rerank_model
+RERANK_TOP_M = settings.rerank_top_m
 
 # LLM (LM Studio or OpenAI-compatible)
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:1234/v1")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "lm-studio")  # any non-empty string for LM Studio
-LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama-3.1-8b-instruct")
+OPENAI_BASE_URL = settings.openai_base_url
+OPENAI_API_KEY = settings.openai_api_key  # any non-empty string for LM Studio
+LLM_MODEL = settings.llm_model
 
 # Misc
-SHOW_RETRIEVED = True
+SHOW_RETRIEVED = settings.show_retrieved
 
 
 # --------------------------------------------------------------------------------------
@@ -299,6 +304,9 @@ class RAGEngine:
 # --------------------------------------------------------------------------------------
 app = FastAPI(title="Doc_GPT API", version="0.1.0")
 
+if WEB_DIR.exists():
+    app.mount("/web", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+
 # CORS: allow local UI/dev ports
 app.add_middleware(
     CORSMiddleware,
@@ -313,6 +321,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Redirect root to the web UI when available
+@app.get("/", include_in_schema=False)
+def serve_root() -> Any:
+    if WEB_DIR.exists():
+        return RedirectResponse(url="/web/index.html")
+    return {"status": "ok"}
+
 # Initialize engine at import time
 try:
     ENGINE = RAGEngine(FLAT_DIR)
@@ -325,12 +340,22 @@ else:
 
 @app.get("/healthz")
 def healthz() -> Dict[str, Any]:
+    env_info = {
+        "env_files": list(ENV_FILES_LOADED),
+        "web_dir": str(WEB_DIR),
+        "web_available": WEB_DIR.exists(),
+    }
+
     if ENGINE is None:
         return {
             "status": "error",
             "detail": str(INIT_ERR) if INIT_ERR else "unknown",
+            **env_info,
         }
-    return ENGINE.status()
+
+    payload = ENGINE.status()
+    payload.update(env_info)
+    return payload
 
 
 @app.post("/ask", response_model=AskResponse)

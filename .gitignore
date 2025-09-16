@@ -1,4 +1,3 @@
-@'
 # --- Python / venv ---
 .venv/
 __pycache__/
@@ -35,4 +34,3 @@ lmstudio-*.*
 node_modules/
 dist/
 build/
-'@ | Set-Content -Encoding UTF8 .gitignore
