@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Tuple
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sklearn.neighbors import NearestNeighbors
 from rank_bm25 import BM25Okapi
@@ -34,6 +34,7 @@ ENV_FILES_LOADED = tuple(str(path) for path in iter_existing_env_files())
 # --------------------------------------------------------------------------------------
 FLAT_DIR = settings.flat_index_dir
 WEB_DIR = settings.web_dir
+WEB_INDEX = WEB_DIR / "index.html"
 EMB_MODEL_NAME = settings.embedding_model
 
 # Hybrid (dense + BM25) controls
@@ -303,6 +304,16 @@ app = FastAPI(title="Doc_GPT API", version="0.1.0")
 if WEB_DIR.exists():
     app.mount("/web", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
 
+
+def _serve_ui() -> FileResponse:
+    """Return the bundled web UI if it exists."""
+
+    if not WEB_DIR.exists():
+        raise HTTPException(status_code=404, detail="Web UI bundle is missing.")
+    if not WEB_INDEX.exists():
+        raise HTTPException(status_code=500, detail="index.html not found in web bundle.")
+    return FileResponse(WEB_INDEX)
+
 # CORS: allow local UI/dev ports
 app.add_middleware(
     CORSMiddleware,
@@ -321,8 +332,18 @@ app.add_middleware(
 @app.get("/", include_in_schema=False)
 def serve_root() -> Any:
     if WEB_DIR.exists():
-        return RedirectResponse(url="/web/index.html")
+        return _serve_ui()
     return {"status": "ok"}
+
+
+@app.get("/web", include_in_schema=False)
+def serve_web_root() -> Any:
+    return serve_root()
+
+
+@app.get("/web/index.html", include_in_schema=False)
+def serve_web_index() -> Any:
+    return _serve_ui()
 
 # Initialize engine at import time
 try:
@@ -340,6 +361,8 @@ def healthz() -> Dict[str, Any]:
         "env_files": list(ENV_FILES_LOADED),
         "web_dir": str(WEB_DIR),
         "web_available": WEB_DIR.exists(),
+        "web_index": str(WEB_INDEX),
+        "web_index_exists": WEB_INDEX.exists(),
     }
 
     if ENGINE is None:
