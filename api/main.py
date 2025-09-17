@@ -8,7 +8,8 @@ from typing import List, Dict, Any, Tuple
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sklearn.neighbors import NearestNeighbors
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
@@ -25,6 +26,7 @@ except Exception:  # fallback if older SDK is present
 from utils.red_flags import detect_red_flags, classify_red_flag_severity, RED_FLAG_BANNER
 from .config import get_settings, iter_existing_env_files
 
+# Load environment variables from any discovered env files (project/local)
 _ENV_PATHS = tuple(iter_existing_env_files())
 for env_path in _ENV_PATHS:
     load_dotenv(env_path, override=False)
@@ -32,13 +34,11 @@ for env_path in _ENV_PATHS:
 settings = get_settings()
 ENV_FILES_LOADED = tuple(str(path) for path in _ENV_PATHS)
 
-
 # --------------------------------------------------------------------------------------
 # Settings
 # --------------------------------------------------------------------------------------
 FLAT_DIR = settings.flat_index_dir
 WEB_DIR = settings.web_dir
-WEB_INDEX = WEB_DIR / "index.html"
 EMB_MODEL_NAME = settings.embedding_model
 
 # Hybrid (dense + BM25) controls
@@ -305,36 +305,9 @@ class RAGEngine:
 # --------------------------------------------------------------------------------------
 app = FastAPI(title="Doc_GPT API", version="0.1.0")
 
-
-def _serve_ui() -> FileResponse:
-    """Return the bundled web UI if it exists."""
-
-    if not WEB_DIR.exists():
-        raise HTTPException(status_code=404, detail="Web UI bundle is missing.")
-    if not WEB_INDEX.exists():
-        raise HTTPException(status_code=500, detail="index.html not found in web bundle.")
-    return FileResponse(WEB_INDEX)
-
-
-def _resolve_web_asset(asset_path: str) -> Path:
-    """Return a safe absolute path inside the bundled web directory."""
-
-    if not WEB_DIR.exists():
-        raise HTTPException(status_code=404, detail="Web UI bundle is missing.")
-
-    candidate = (WEB_DIR / asset_path).resolve()
-    try:
-        candidate.relative_to(WEB_DIR.resolve())
-    except ValueError:  # pragma: no cover - safety guard
-        raise HTTPException(status_code=404, detail="Asset not found.")
-
-    if candidate.is_dir():
-        candidate = candidate / "index.html"
-
-    if not candidate.exists() or not candidate.is_file():
-        raise HTTPException(status_code=404, detail="Asset not found.")
-
-    return candidate
+# Serve SPA bundle if available
+if WEB_DIR.exists():
+    app.mount("/web", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
 
 # CORS: allow local UI/dev ports
 app.add_middleware(
@@ -354,24 +327,8 @@ app.add_middleware(
 @app.get("/", include_in_schema=False)
 def serve_root() -> Any:
     if WEB_DIR.exists():
-        return RedirectResponse(url="/web")
+        return RedirectResponse(url="/web/index.html")
     return {"status": "ok"}
-
-
-@app.get("/web", include_in_schema=False)
-def serve_web_root() -> Any:
-    return _serve_ui()
-
-
-@app.get("/web/index.html", include_in_schema=False)
-def serve_web_index() -> Any:
-    return _serve_ui()
-
-
-@app.get("/web/{asset_path:path}", include_in_schema=False)
-def serve_web_asset(asset_path: str) -> Any:
-    target = _resolve_web_asset(asset_path)
-    return FileResponse(target)
 
 # Initialize engine at import time
 try:
@@ -389,8 +346,6 @@ def healthz() -> Dict[str, Any]:
         "env_files": list(ENV_FILES_LOADED),
         "web_dir": str(WEB_DIR),
         "web_available": WEB_DIR.exists(),
-        "web_index": str(WEB_INDEX),
-        "web_index_exists": WEB_INDEX.exists(),
     }
 
     if ENGINE is None:
