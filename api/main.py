@@ -26,12 +26,13 @@ except Exception:  # fallback if older SDK is present
 from utils.red_flags import detect_red_flags, classify_red_flag_severity, RED_FLAG_BANNER
 from .config import get_settings, iter_existing_env_files
 
+# Load environment variables from any discovered env files (project/local)
+_ENV_PATHS = tuple(iter_existing_env_files())
+for env_path in _ENV_PATHS:
+    load_dotenv(env_path, override=False)
+
 settings = get_settings()
-ENV_FILES_LOADED = tuple(str(path) for path in iter_existing_env_files())
-
-# Load environment variables from a local .env file if present
-load_dotenv()
-
+ENV_FILES_LOADED = tuple(str(path) for path in _ENV_PATHS)
 
 # --------------------------------------------------------------------------------------
 # Settings
@@ -304,6 +305,7 @@ class RAGEngine:
 # --------------------------------------------------------------------------------------
 app = FastAPI(title="Doc_GPT API", version="0.1.0")
 
+# Serve SPA bundle if available
 if WEB_DIR.exists():
     app.mount("/web", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
 
