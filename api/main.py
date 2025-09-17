@@ -9,7 +9,6 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from sklearn.neighbors import NearestNeighbors
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
@@ -301,9 +300,6 @@ class RAGEngine:
 # --------------------------------------------------------------------------------------
 app = FastAPI(title="Doc_GPT API", version="0.1.0")
 
-if WEB_DIR.exists():
-    app.mount("/web", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
-
 
 def _serve_ui() -> FileResponse:
     """Return the bundled web UI if it exists."""
@@ -313,6 +309,27 @@ def _serve_ui() -> FileResponse:
     if not WEB_INDEX.exists():
         raise HTTPException(status_code=500, detail="index.html not found in web bundle.")
     return FileResponse(WEB_INDEX)
+
+
+def _resolve_web_asset(asset_path: str) -> Path:
+    """Return a safe absolute path inside the bundled web directory."""
+
+    if not WEB_DIR.exists():
+        raise HTTPException(status_code=404, detail="Web UI bundle is missing.")
+
+    candidate = (WEB_DIR / asset_path).resolve()
+    try:
+        candidate.relative_to(WEB_DIR.resolve())
+    except ValueError:  # pragma: no cover - safety guard
+        raise HTTPException(status_code=404, detail="Asset not found.")
+
+    if candidate.is_dir():
+        candidate = candidate / "index.html"
+
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found.")
+
+    return candidate
 
 # CORS: allow local UI/dev ports
 app.add_middleware(
@@ -338,12 +355,18 @@ def serve_root() -> Any:
 
 @app.get("/web", include_in_schema=False)
 def serve_web_root() -> Any:
-    return serve_root()
+    return _serve_ui()
 
 
 @app.get("/web/index.html", include_in_schema=False)
 def serve_web_index() -> Any:
     return _serve_ui()
+
+
+@app.get("/web/{asset_path:path}", include_in_schema=False)
+def serve_web_asset(asset_path: str) -> Any:
+    target = _resolve_web_asset(asset_path)
+    return FileResponse(target)
 
 # Initialize engine at import time
 try:
