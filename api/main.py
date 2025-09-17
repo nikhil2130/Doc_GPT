@@ -8,11 +8,12 @@ from typing import List, Dict, Any, Tuple
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sklearn.neighbors import NearestNeighbors
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 from tenacity import retry, wait_exponential, stop_after_attempt
+from dotenv import load_dotenv
 
 # OpenAI-compatible client (for LM Studio or OpenAI)
 try:
@@ -24,8 +25,12 @@ except Exception:  # fallback if older SDK is present
 from utils.red_flags import detect_red_flags, classify_red_flag_severity, RED_FLAG_BANNER
 from .config import get_settings, iter_existing_env_files
 
+_ENV_PATHS = tuple(iter_existing_env_files())
+for env_path in _ENV_PATHS:
+    load_dotenv(env_path, override=False)
+
 settings = get_settings()
-ENV_FILES_LOADED = tuple(str(path) for path in iter_existing_env_files())
+ENV_FILES_LOADED = tuple(str(path) for path in _ENV_PATHS)
 
 
 # --------------------------------------------------------------------------------------
@@ -349,7 +354,7 @@ app.add_middleware(
 @app.get("/", include_in_schema=False)
 def serve_root() -> Any:
     if WEB_DIR.exists():
-        return _serve_ui()
+        return RedirectResponse(url="/web")
     return {"status": "ok"}
 
 
