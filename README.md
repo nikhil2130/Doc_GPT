@@ -52,17 +52,28 @@ py -3.12 -m venv .venv
 pip install --upgrade pip
 pip install -r requirements.txt
 
-3. Environment variables (.env file at project root)
-# LLM connection
+3. Configure environment variables
+Copy `.env.example` to `.env` and tweak values if you need different ports or models:
+
+cp .env.example .env
+
+Defaults:
 OPENAI_BASE_URL=http://127.0.0.1:1234/v1
 OPENAI_API_KEY=not-needed-for-local
 LLM_MODEL=meta-llama-3.1-8b-instruct
-
-# Indexing
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 COLLECTION_NAME=doc_gpt
 CHROMA_DIR=./data/chroma
+FLAT_INDEX_DIR=./data/flatindex
+HYBRID_ALPHA=0.4
+RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+RERANK_TOP_M=12
 
+4. Start a local LLM server (LM Studio)
+- Launch LM Studio and open **Developer / Server**.
+- Pick a chat-friendly model, e.g. `Meta-Llama-3.1-8B-Instruct`.
+- Set the port to `1234` so it matches `OPENAI_BASE_URL`.
+- Click **Start Server**. LM Studio now serves an OpenAI-compatible endpoint at `http://127.0.0.1:1234/v1`.
 🕸️ Crawl Data
 
 Edit data/sources.csv with NHS/CDC links like:
@@ -94,7 +105,7 @@ python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 
 Then open in browser:
 
-http://127.0.0.1:8000/web/index.html
+http://127.0.0.1:8000/  (redirects to the bundled web UI)
 
 💬 Example Query
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/ask" -Method POST `

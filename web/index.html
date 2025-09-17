@@ -1,121 +1,739 @@
-<!-- D:\projects\Doc_GPT\web\index.html -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Doc_GPT – NHS/CDC RAG Demo</title>
+  <title>Doc_GPT – Health Copilot</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
     :root {
-      --bg: #0b0f13;
-      --panel: #121820;
-      --text: #e8eef5;
-      --muted: #9bb0c3;
-      --accent: #57a6ff;
-      --warn: #ffb020;
-      --danger: #ff5b6e;
-      --ok: #2ecc71;
-      --card: #0f151c;
-      --chip: #1d2631;
-      --border: #242f3a;
+      --bg: #050b15;
+      --bg-alt: #091124;
+      --surface: rgba(11, 18, 32, 0.75);
+      --panel: rgba(18, 29, 47, 0.7);
+      --card: rgba(16, 25, 40, 0.85);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.18);
+      --text: #f4f7fb;
+      --muted: #b7c4d8;
+      --accent: #4da8ff;
+      --accent-strong: #7c5dff;
+      --accent-soft: rgba(98, 127, 255, 0.2);
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --shadow: 0 24px 60px rgba(13, 24, 43, 0.45);
+      --radius-lg: 22px;
+      --radius: 16px;
+      --radius-sm: 12px;
+      color-scheme: dark;
     }
-    * { box-sizing: border-box; }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      margin: 0; background: var(--bg); color: var(--text);
-      font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: radial-gradient(circle at 20% 20%, rgba(92, 64, 255, 0.35), transparent 60%),
+        radial-gradient(circle at 80% 0%, rgba(77, 168, 255, 0.4), transparent 55%),
+        linear-gradient(160deg, var(--bg) 0%, #02050c 60%, #050910 100%);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
     }
+
+    button, input, textarea {
+      font-family: inherit;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .page {
+      position: relative;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .orb {
+      position: absolute;
+      filter: blur(120px);
+      opacity: 0.6;
+      z-index: -1;
+    }
+
+    .orb.one {
+      width: 460px;
+      height: 460px;
+      background: #623cff;
+      top: -120px;
+      left: -160px;
+    }
+
+    .orb.two {
+      width: 380px;
+      height: 380px;
+      background: #2fd7ff;
+      bottom: -160px;
+      right: -80px;
+    }
+
     header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 18px 20px; border-bottom: 1px solid var(--border);
-      background: linear-gradient(180deg, #0e141b, #0b0f13);
-      position: sticky; top: 0; z-index: 10;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(18px);
+      background: linear-gradient(90deg, rgba(5, 11, 21, 0.85), rgba(6, 12, 24, 0.6));
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
     }
-    header .brand { display: flex; gap: 10px; align-items: center; }
-    .brand .logo { width: 28px; height: 28px; border-radius: 6px; background: var(--accent); }
-    .brand h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #7f5bff 0%, #4ec9ff 100%);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      color: #060b14;
+      letter-spacing: 0.4px;
+      font-size: 16px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+    }
+
+    .tagline {
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.2px;
+    }
+
+    .nav-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(77, 168, 255, 0.12);
+      border: 1px solid rgba(77, 168, 255, 0.35);
+      color: var(--accent);
+      font-weight: 500;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1.1px;
+    }
+
     main {
-      max-width: 980px; margin: 28px auto; padding: 0 16px; display: grid; gap: 16px;
-      grid-template-columns: 1fr;
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 48px 32px 120px;
+      display: flex;
+      flex-direction: column;
+      gap: 40px;
     }
-    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
-    .muted { color: var(--muted); }
-    .row { display: flex; gap: 10px; }
-    .grow { flex: 1; }
-    textarea, input {
-      width: 100%; background: var(--card); color: var(--text);
-      border: 1px solid var(--border); outline: none; border-radius: 10px;
-      padding: 12px 14px; font-size: 14px;
+
+    .hero {
+      display: grid;
+      gap: 32px;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      align-items: center;
     }
-    button {
-      background: var(--accent); color: #08111a; border: none; border-radius: 10px;
-      padding: 12px 16px; font-weight: 600; cursor: pointer;
+
+    .hero h2 {
+      margin: 0 0 14px;
+      font-size: clamp(32px, 4vw, 42px);
+      font-weight: 700;
+      letter-spacing: 0.2px;
     }
-    button:disabled { opacity: .6; cursor: not-allowed; }
-    .pill { display: inline-flex; gap: 8px; border-radius: 999px; padding: 8px 12px; font-size: 12px; }
-    .pill.warn { background: #2b1e07; color: var(--warn); border: 1px solid #3b2b0b; }
-    .pill.danger { background: #2b0e13; color: var(--danger); border: 1px solid #3a161b; }
-    .grid { display: grid; gap: 12px; }
-    .grid-2 { grid-template-columns: 1fr 1fr; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .chip { background: var(--chip); color: var(--muted); font-size: 12px; padding: 6px 8px; border-radius: 999px; border: 1px solid var(--border); }
-    a { color: var(--accent); text-decoration: none; }
-    .small { font-size: 12px; }
-    pre { white-space: pre-wrap; word-wrap: break-word; }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .hero-cta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .status-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 20px;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 12px;
+    }
+
+    .status-card h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+    }
+
+    .status-pill {
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(16, 27, 45, 0.85);
+      font-size: 13px;
+      color: var(--muted);
+      display: grid;
+      gap: 6px;
+    }
+
+    .status-pill strong {
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 24px;
+      align-items: flex-start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      padding: 28px;
+      display: grid;
+      gap: 24px;
+    }
+
+    .panel h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    label {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 8px;
+      display: inline-block;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      resize: vertical;
+      padding: 18px 20px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-strong);
+      background: rgba(8, 14, 26, 0.85);
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.6;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    textarea:focus {
+      border-color: rgba(103, 132, 255, 0.9);
+      box-shadow: 0 0 0 4px rgba(105, 141, 255, 0.15);
+      outline: none;
+    }
+
+    input[type="number"] {
+      width: 100%;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(10, 18, 30, 0.85);
+      color: var(--text);
+      font-size: 15px;
+    }
+
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .input-row {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+    }
+
+    .ask-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 999px;
+      border: none;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      color: #061022;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+      box-shadow: 0 16px 30px rgba(79, 120, 255, 0.35);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+    }
+
+    .ask-button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 20px 40px rgba(82, 133, 255, 0.4);
+    }
+
+    .ask-button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chip {
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(102, 126, 255, 0.35);
+      background: rgba(102, 126, 255, 0.12);
+      color: var(--muted);
+      font-size: 13px;
+      cursor: pointer;
+      transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
+    }
+
+    .chip:hover {
+      transform: translateY(-1px);
+      background: rgba(102, 126, 255, 0.2);
+      color: var(--text);
+    }
+
+    .insights {
+      display: grid;
+      gap: 18px;
+    }
+
+    .insight-card {
+      background: var(--card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      padding: 22px 24px;
+      box-shadow: 0 18px 40px rgba(5, 10, 20, 0.45);
+      display: grid;
+      gap: 16px;
+    }
+
+    .insight-card h4 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .insight-card .subline {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .answer-box {
+      max-height: 280px;
+      overflow-y: auto;
+      padding-right: 4px;
+      font-size: 15px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+
+    .answer-box::-webkit-scrollbar,
+    .scrollable::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .answer-box::-webkit-scrollbar-thumb,
+    .scrollable::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 999px;
+    }
+
+    .scrollable {
+      max-height: 260px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .citation-list,
+    .retrieved-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .citation-item {
+      border-radius: var(--radius);
+      border: 1px solid rgba(98, 143, 255, 0.3);
+      background: rgba(73, 104, 255, 0.12);
+      padding: 14px 16px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .citation-item a {
+      color: var(--text);
+      font-weight: 500;
+      text-decoration: none;
+    }
+
+    .citation-item a:hover {
+      text-decoration: underline;
+    }
+
+    .citation-item span {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .retrieved-item {
+      padding: 16px;
+      border-radius: var(--radius);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(10, 19, 33, 0.85);
+      display: grid;
+      gap: 8px;
+    }
+
+    .retrieved-item .title {
+      font-weight: 600;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .retrieved-item .snippet {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      border: 1px solid transparent;
+    }
+
+    .pill.ok {
+      background: rgba(74, 222, 128, 0.14);
+      color: var(--success);
+      border-color: rgba(74, 222, 128, 0.35);
+    }
+
+    .pill.warn {
+      background: rgba(251, 191, 36, 0.14);
+      color: var(--warning);
+      border-color: rgba(251, 191, 36, 0.35);
+    }
+
+    .pill.danger {
+      background: rgba(248, 113, 113, 0.14);
+      color: var(--danger);
+      border-color: rgba(248, 113, 113, 0.35);
+    }
+
+    .rf-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .rf-tags .chip {
+      border-color: rgba(248, 113, 113, 0.45);
+      background: rgba(248, 113, 113, 0.18);
+      color: var(--danger);
+    }
+
+    footer {
+      padding: 32px;
+      text-align: center;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 13px;
+    }
+
+    @media (max-width: 1080px) {
+      main {
+        padding: 36px 24px 80px;
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      header {
+        padding: 18px 20px;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .nav-meta {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      main {
+        padding: 28px 18px 60px;
+      }
+
+      .panel {
+        padding: 22px;
+      }
+
+      .insight-card {
+        padding: 18px 20px;
+      }
+
+      .input-row {
+        grid-template-columns: 1fr;
+      }
+
+      .ask-button {
+        width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <div class="logo"></div>
-      <h1>Doc_GPT • Health Q&A (NHS/CDC)</h1>
-    </div>
-    <div class="muted small">Local demo • not medical advice</div>
-  </header>
+  <div class="page">
+    <div class="orb one"></div>
+    <div class="orb two"></div>
 
-  <main>
-    <section class="panel">
-      <div class="grid" style="gap: 12px;">
-        <div class="row">
-          <textarea id="q" rows="3" placeholder="Describe your symptoms… e.g., sore throat and mild fever."></textarea>
-        </div>
-        <div class="row">
-          <input id="k" class="grow" type="number" min="1" max="12" value="6" />
-          <button id="ask">Ask</button>
+    <header>
+      <div class="brand">
+        <div class="logo">DG</div>
+        <div>
+          <h1>Doc_GPT</h1>
+          <div class="tagline">Evidence-backed health guidance (NHS & CDC)</div>
         </div>
       </div>
-    </section>
+      <div class="nav-meta">
+        <div class="badge">Local Demo</div>
+        <span>Not medical advice</span>
+      </div>
+    </header>
 
-    <section class="panel grid grid-2">
-      <div class="card">
-        <div class="muted small">Answer</div>
-        <pre id="answer" style="margin-top:8px;"></pre>
-      </div>
-      <div class="card">
-        <div class="muted small">Citations</div>
-        <div id="cites" class="grid" style="margin-top:8px;"></div>
-      </div>
-      <div class="card">
-        <div class="muted small">Red-flag check</div>
-        <div id="rf" style="margin-top:8px;"></div>
-      </div>
-      <div class="card">
-        <div class="muted small">Retrieved chunks (debug)</div>
-        <div id="retr" class="grid" style="margin-top:8px;"></div>
-      </div>
-    </section>
-  </main>
+    <main>
+      <section class="hero">
+        <div>
+          <h2>Your modern triage copilot.</h2>
+          <p>Doc_GPT blends retrieval from trusted medical sources with a local language model, giving you quick symptom insights, red flag checks, and references you can verify. Built for experimentation—never as a replacement for professional care.</p>
+          <div class="hero-cta">
+            <div class="badge" style="background: rgba(124, 93, 255, 0.18); border-color: rgba(124, 93, 255, 0.45); color: #c7b5ff;">Hybrid RAG • Reranking • Citations</div>
+            <div class="badge" style="background: rgba(77, 168, 255, 0.18); border-color: rgba(77, 168, 255, 0.4); color: #9dd6ff;">Runs with your local LLM</div>
+          </div>
+        </div>
+        <div class="status-card">
+          <h3>Environment snapshot</h3>
+          <div class="status-grid">
+            <div class="status-pill">
+              <span>LLM Model</span>
+              <strong><span id="model-name">Configured via .env</span></strong>
+            </div>
+            <div class="status-pill">
+              <span>Retriever</span>
+              <strong>Hybrid BM25 + Embeddings</strong>
+            </div>
+            <div class="status-pill">
+              <span>Sources</span>
+              <strong>NHS • CDC • WHO</strong>
+            </div>
+            <div class="status-pill">
+              <span>Health Check</span>
+              <strong id="health-status">/healthz</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="panel">
+          <h3>Describe what you’re feeling</h3>
+          <div>
+            <label for="q">Symptom description</label>
+            <textarea id="q" rows="4" placeholder="Describe your symptoms… e.g., &quot;Scratchy throat, chills, and fatigue for two days.&quot;"></textarea>
+          </div>
+          <div>
+            <label>Popular quick prompts</label>
+            <div class="chips">
+              <button class="chip" type="button" data-example="Persistent cough with shortness of breath and mild fever.">Respiratory check</button>
+              <button class="chip" type="button" data-example="High temperature and stiff neck after travel.">Travel concern</button>
+              <button class="chip" type="button" data-example="Stomach cramps, nausea, and dizziness after eating out.">Food reaction</button>
+              <button class="chip" type="button" data-example="Throbbing headache with blurred vision and light sensitivity.">Headache insight</button>
+            </div>
+          </div>
+          <div class="input-row">
+            <div>
+              <label for="k">Sources to retrieve</label>
+              <input id="k" type="number" min="1" max="12" value="6" />
+            </div>
+            <button id="ask" class="ask-button" disabled>
+              <span>Ask Doc_GPT</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="insights">
+          <div class="insight-card">
+            <div>
+              <h4>Guidance</h4>
+              <div class="subline">Summarized answer tailored to your question.</div>
+            </div>
+            <div id="answer" class="answer-box muted">Your answer will appear here once you submit a question.</div>
+          </div>
+
+          <div class="insight-card">
+            <div>
+              <h4>Citations</h4>
+              <div class="subline">Direct links back to evidence.</div>
+            </div>
+            <div id="cites" class="citation-list"></div>
+          </div>
+
+          <div class="insight-card">
+            <div>
+              <h4>Red flag scan</h4>
+              <div class="subline">Highlights potential emergency signals.</div>
+            </div>
+            <div id="rf"></div>
+          </div>
+
+          <div class="insight-card">
+            <div>
+              <h4>Retrieved context (debug)</h4>
+              <div class="subline">Top passages powering the answer.</div>
+            </div>
+            <div id="retr" class="retrieved-list scrollable"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      Built for learning and experimentation. Always consult medical professionals for diagnosis or treatment.
+    </footer>
+  </div>
 
   <script>
     const askBtn = document.getElementById('ask');
     const qEl = document.getElementById('q');
     const kEl = document.getElementById('k');
+    const modelNameEl = document.getElementById('model-name');
+    const healthStatusEl = document.getElementById('health-status');
     const out = (id) => document.getElementById(id);
+
+    function updateAskState() {
+      askBtn.disabled = qEl.value.trim().length === 0;
+    }
+
+    qEl.addEventListener('input', updateAskState);
+    qEl.addEventListener('keydown', (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !askBtn.disabled) {
+        askBtn.click();
+      }
+    });
+
+    document.querySelectorAll('[data-example]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        qEl.value = btn.dataset.example;
+        qEl.focus();
+        updateAskState();
+      });
+    });
+
+    async function hydrateStatus() {
+      if (!healthStatusEl) return;
+      try {
+        const res = await fetch('/healthz');
+        if (!res.ok) throw new Error('Status unavailable');
+        const data = await res.json();
+        if (modelNameEl && (data.llm_model || data.model)) {
+          modelNameEl.textContent = data.llm_model || data.model;
+        }
+        if (data.status) {
+          healthStatusEl.textContent = data.status === 'ok' ? 'Online' : 'Check setup';
+          healthStatusEl.style.color = data.status === 'ok' ? 'var(--success)' : 'var(--warning)';
+        }
+      } catch (err) {
+        healthStatusEl.textContent = 'Offline';
+        healthStatusEl.style.color = 'var(--warning)';
+      }
+    }
 
     async function callAsk(query, k) {
       const res = await fetch('/ask', {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query, k: Number(k) || 6 })
       });
       if (!res.ok) throw new Error(await res.text());
@@ -126,18 +744,29 @@
       const box = out('rf');
       box.innerHTML = '';
       if (!rf || rf.severity === 'none') {
-        box.innerHTML = '<span class="chip">No emergency signs detected.</span>';
+        const pill = document.createElement('div');
+        pill.className = 'pill ok';
+        pill.textContent = 'No urgent warning signs detected.';
+        box.appendChild(pill);
         return;
       }
+
+      const severity = rf.severity || 'warn';
+      const classes = severity === 'critical' ? 'pill danger' : 'pill warn';
       const pill = document.createElement('div');
-      pill.className = 'pill danger';
-      pill.textContent = rf.banner || 'Emergency signs detected.';
+      pill.className = classes;
+      pill.textContent = rf.banner || 'Potential red flags detected.';
       box.appendChild(pill);
+
       if (rf.matches?.length) {
         const chips = document.createElement('div');
-        chips.className = 'chips'; 
-        rf.matches.forEach(m => {
-          const c = document.createElement('div'); c.className = 'chip'; c.textContent = m; chips.appendChild(c);
+        chips.className = 'rf-tags';
+        rf.matches.forEach((text) => {
+          const tag = document.createElement('button');
+          tag.type = 'button';
+          tag.className = 'chip';
+          tag.textContent = text;
+          chips.appendChild(tag);
         });
         box.appendChild(chips);
       }
@@ -146,42 +775,78 @@
     function showCites(citations) {
       const box = out('cites');
       box.innerHTML = '';
-      (citations || []).forEach(c => {
-        const div = document.createElement('div');
-        div.className = 'chip';
-        div.innerHTML = `<span class="small">[#${c.n}]</span> <a href="${c.url}" target="_blank">${c.title}</a>`;
-        box.appendChild(div);
+      (citations || []).forEach((cite) => {
+        const item = document.createElement('div');
+        item.className = 'citation-item';
+        const title = cite.title || cite.url || 'Source';
+        item.innerHTML = `
+          <span>Source #${cite.n ?? ''}</span>
+          <a href="${cite.url}" target="_blank" rel="noopener">${title}</a>
+        `;
+        box.appendChild(item);
       });
+      if (!box.children.length) {
+        const empty = document.createElement('div');
+        empty.className = 'pill ok';
+        empty.textContent = 'Citations will appear here after a query.';
+        box.appendChild(empty);
+      }
     }
 
     function showRetrieved(rows) {
       const box = out('retr');
       box.innerHTML = '';
-      (rows || []).slice(0,6).forEach(r => {
-        const div = document.createElement('div'); div.className='card';
-        div.innerHTML = `<div class="small muted">${r.meta?.title || ''}</div><div style="margin-top:6px;">${(r.text||'').slice(0,320)}</div>`;
-        box.appendChild(div);
+      (rows || []).slice(0, 6).forEach((row, idx) => {
+        const item = document.createElement('div');
+        item.className = 'retrieved-item';
+        item.innerHTML = `
+          <div class="title">${row.meta?.title || 'Chunk #' + (idx + 1)}</div>
+          <div class="snippet">${(row.text || '').slice(0, 320)}${(row.text || '').length > 320 ? '…' : ''}</div>
+        `;
+        box.appendChild(item);
       });
+      if (!box.children.length) {
+        const hint = document.createElement('div');
+        hint.className = 'pill ok';
+        hint.textContent = 'Retrieved passages will show up after you run a search.';
+        box.appendChild(hint);
+      }
     }
 
-    askBtn.addEventListener('click', async () => {
+    async function runQuery() {
+      const query = qEl.value.trim();
+      if (!query) return;
       askBtn.disabled = true;
-      out('answer').textContent = 'Thinking…';
+      askBtn.dataset.prev = askBtn.innerHTML;
+      askBtn.innerHTML = '<span>Thinking…</span>';
+      out('answer').textContent = 'Working on your request…';
+      out('answer').classList.remove('muted');
       out('cites').innerHTML = '';
       out('rf').innerHTML = '';
       out('retr').innerHTML = '';
       try {
-        const data = await callAsk(qEl.value.trim(), kEl.value);
-        out('answer').textContent = data.answer || '';
+        const data = await callAsk(query, kEl.value);
+        out('answer').textContent = data.answer || 'No answer generated.';
         showCites(data.citations || []);
         showRF(data.red_flag || {});
         showRetrieved(data.retrieved || []);
       } catch (err) {
         out('answer').textContent = 'Error: ' + (err?.message || err);
+        out('answer').classList.add('muted');
       } finally {
         askBtn.disabled = false;
+        askBtn.innerHTML = askBtn.dataset.prev || '<span>Ask Doc_GPT</span>';
       }
-    });
+    }
+
+    askBtn.addEventListener('click', runQuery);
+    hydrateStatus();
+    setInterval(hydrateStatus, 20000);
+    updateAskState();
+    showCites([]);
+    showRF(null);
+    showRetrieved([]);
+    qEl.focus({ preventScroll: true });
   </script>
 </body>
 </html>
